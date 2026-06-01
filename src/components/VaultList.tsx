@@ -37,15 +37,6 @@ export default function VaultList() {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm("Delete this entry? This cannot be undone.")) return;
-    try {
-      await invoke("delete_entry", { id });
-      await loadEntries();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
 
   async function handleSave(entry: NewEntry) {
     try {
