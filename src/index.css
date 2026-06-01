@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/* ── Design tokens ───────────────────────────────────────────────────────── */
+:root {
+  /* Dark (default) */
+  --c-bg:        #0d0f17;
+  --c-surface-1: #161926;
+  --c-surface-2: #1e2235;
+  --c-surface-3: #272c42;
+  --c-border:    rgba(255, 255, 255, 0.07);
+  --c-accent:    #6366f1;
+  --c-accent-h:  #818cf8;
+  --c-text-1:    #eef2ff;
+  --c-text-2:    #94a3b8;
+  --c-text-3:    #4b5563;
+  --c-danger:    #f87171;
+  --c-success:   #4ade80;
+  --c-warn:      #fbbf24;
+
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --c-bg:        #f1f5f9;
+    --c-surface-1: #ffffff;
+    --c-surface-2: #f8fafc;
+    --c-surface-3: #e2e8f0;
+    --c-border:    rgba(0, 0, 0, 0.08);
+    --c-accent:    #6366f1;
+    --c-accent-h:  #4f46e5;
+    --c-text-1:    #0f172a;
+    --c-text-2:    #475569;
+    --c-text-3:    #94a3b8;
+    --c-danger:    #dc2626;
+    --c-success:   #16a34a;
+    --c-warn:      #d97706;
+  }
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-text-1);
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--c-surface-3); border-radius: 99px; }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+.shake { animation: shake 0.35s ease; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fade-in 0.2s ease both; }
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.slide-in-right { animation: slide-in-right 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
