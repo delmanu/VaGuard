@@ -134,4 +134,4 @@ maintainer directly. Do not include credentials or vault data in bug reports.
 
 ## 📄 License
 
-MIT © 2025 [Tu nombre] — see [LICENSE](LICENSE) for details.
+MIT © 2025 delmanu — see [LICENSE](LICENSE) for details.
