@@ -78,8 +78,8 @@ using (
 ### Run in development
 
 ```powershell
-git clone https://github.com/YOUR_USERNAME/vault-app.git
-cd vault-app
+git clone https://github.com/YOUR_USERNAME/vaguard.git
+cd vaguard
 npm install
 npm run tauri dev
 ```
