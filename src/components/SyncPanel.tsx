@@ -4,7 +4,11 @@ import type { SyncStatus } from "../types";
 
 const EMAIL_NOT_CONFIRMED = "__email_not_confirmed__";
 
-export default function SyncPanel() {
+export default function SyncPanel({
+  onDownloadComplete,
+}: {
+  onDownloadComplete: (count: number) => void;
+}) {
   const [status, setStatus]       = useState<SyncStatus | null>(null);
   const [loading, setLoading]     = useState(true);
   const [busy, setBusy]           = useState<string | null>(null); // label of in-progress action
@@ -21,6 +25,11 @@ export default function SyncPanel() {
   // Login form (when configured but not authenticated)
   const [loginPw, setLoginPw]   = useState("");
   const [showLoginPw, setShowLoginPw] = useState(false);
+
+  // Download confirmation modal — asks for master password
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [downloadMasterPw, setDownloadMasterPw]   = useState("");
+  const [showDownloadPw, setShowDownloadPw]       = useState(false);
 
   useEffect(() => { loadStatus(); }, []);
 
@@ -80,11 +89,32 @@ export default function SyncPanel() {
     await run("Uploading", () => invoke("sync_upload"));
   }
 
-  async function handleDownload() {
-    if (!confirm(
-      "This will replace your local vault with the cloud version.\n\nContinue?"
-    )) return;
-    await run("Downloading", () => invoke("sync_download"));
+  function handleDownload() {
+    setDownloadMasterPw("");
+    setShowDownloadPw(false);
+    setDownloadModalOpen(true);
+  }
+
+  async function handleDownloadConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    setDownloadModalOpen(false);
+    setError(null);
+    setSuccess(null);
+    setBusy("Downloading");
+    try {
+      const count = await invoke<number>("sync_download", {
+        masterPassword: downloadMasterPw,
+      });
+      await loadStatus();
+      const noun = count === 1 ? "entry" : "entries";
+      setSuccess(`✓ ${count} ${noun} restored successfully.`);
+      // Give the user a moment to read the message, then switch to the list.
+      setTimeout(() => onDownloadComplete(count), 1800);
+    } catch (e) {
+      setError(friendlyError(String(e)));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleDisconnect() {
@@ -107,6 +137,93 @@ export default function SyncPanel() {
   }
 
   return (
+    <>
+    {/* ── Download master-password modal ──────────────────────────────── */}
+    {downloadModalOpen && (
+      <div
+        style={{
+          position: "fixed", inset: 0, zIndex: 50,
+          background: "rgba(0,0,0,0.55)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+        onClick={() => setDownloadModalOpen(false)}
+      >
+        <form
+          onSubmit={handleDownloadConfirm}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "var(--c-surface-1)",
+            border: "1px solid var(--c-border)",
+            borderRadius: 16,
+            padding: "24px 28px",
+            width: 340,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <div>
+            <p className="text-sm font-semibold mb-1" style={{ color: "var(--c-text-1)" }}>
+              Download from cloud
+            </p>
+            <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
+              This will replace your local vault with the cloud version.
+              Enter your <strong>master password</strong> so VaGuard can re-derive
+              the correct encryption key.
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
+              Master password <span style={{ color: "var(--c-danger)" }}>*</span>
+            </label>
+            <div className="relative">
+              <input
+                autoFocus
+                type={showDownloadPw ? "text" : "password"}
+                value={downloadMasterPw}
+                onChange={(e) => setDownloadMasterPw(e.target.value)}
+                required
+                placeholder="Enter master password"
+                className="w-full pr-10 pl-3 py-2 rounded-lg text-xs outline-none"
+                style={{
+                  background: "var(--c-surface-2)",
+                  color: "var(--c-text-1)",
+                  border: "1px solid var(--c-border)",
+                }}
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowDownloadPw((v) => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                style={{ color: "var(--c-text-3)" }}
+              >
+                <EyeIcon open={showDownloadPw} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setDownloadModalOpen(false)}
+              className="flex-1 py-2 rounded-lg text-xs"
+              style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: "var(--c-warn)", color: "white" }}
+            >
+              Download &amp; replace
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
     <div
       className="h-full overflow-y-auto px-8 py-6 fade-in"
       style={{ maxWidth: 560, margin: "0 auto" }}
@@ -371,6 +488,7 @@ export default function SyncPanel() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

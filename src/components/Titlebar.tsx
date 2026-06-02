@@ -23,7 +23,7 @@ export default function Titlebar({ unlocked, onLock }: Props) {
       <div className="flex items-center gap-2.5">
         <ShieldIcon />
         <span style={{ color: "var(--c-text-1)" }} className="font-semibold tracking-tight text-sm">
-          Vault
+          VaGuard
         </span>
       </div>
 

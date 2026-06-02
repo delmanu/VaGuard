@@ -280,23 +280,30 @@ pub fn sync_logout(state: State<'_, AppState>) -> Result<()> {
 }
 
 /// Serialize, encrypt, and upload the vault to Supabase Storage.
+///
+/// Upload format: `{kdf_salt_b64}:{aes_gcm_ciphertext_b64}`
+/// The salt travels in plaintext (it is not secret) so any device can derive
+/// the correct key before decrypting.
 #[tauri::command]
 pub async fn sync_upload(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<()> {
     // Step 1 — collect everything we need while holding the lock briefly.
-    let (entries, key_bytes, url, anon_key, jwt, user_id) = {
+    let (entries, key_bytes, salt_b64, url, anon_key, jwt, user_id) = {
         let s = state.lock().map_err(|e| AppError(e.to_string()))?;
         let (db, key) = vault_open(&s)?;
         let entries = db.list_entries(key)?;
+        let salt_b64 = db.get_meta("kdf_salt")
+            .map_err(|e| AppError(e.to_string()))?
+            .ok_or_else(|| AppError("kdf_salt not found in DB — unlock vault first".into()))?;
         let cfg = s.sync_config.as_ref()
             .ok_or_else(|| AppError("Sync not configured".into()))?;
         let jwt = s.jwt.as_ref()
             .ok_or_else(|| AppError("Not authenticated — call sync_login first".into()))?;
         let uid = s.user_id.as_ref()
             .ok_or_else(|| AppError("Not authenticated".into()))?;
-        (entries, key.0, cfg.supabase_url.clone(), cfg.supabase_anon_key.clone(),
+        (entries, key.0, salt_b64, cfg.supabase_url.clone(), cfg.supabase_anon_key.clone(),
          jwt.clone(), uid.clone())
     };
 
@@ -305,8 +312,12 @@ pub async fn sync_upload(
     let temp_key = VaultKey(key_bytes);
     let encrypted = encrypt(&temp_key, &json)?;
 
+    // Prepend the salt so any device can derive the right key on download.
+    // Format: "{salt_b64}:{cipher_b64}" — colon never appears in base64.
+    let payload = format!("{salt_b64}:{encrypted}");
+
     // Step 3 — upload (async, no lock).
-    sync::upload_vault(&url, &anon_key, &jwt, &user_id, encrypted.into_bytes()).await?;
+    sync::upload_vault(&url, &anon_key, &jwt, &user_id, payload.into_bytes()).await?;
 
     // Step 4 — update timestamp in memory and on disk.
     let now = sync::unix_now();
@@ -323,56 +334,89 @@ pub async fn sync_upload(
     Ok(())
 }
 
-/// Download the encrypted vault from Supabase, decrypt it, and replace
-/// all local entries. Last-write-wins — no merge.
+/// Download the encrypted vault from Supabase, decrypt it with a temporary
+/// key derived from the cloud salt + supplied master password, then
+/// re-encrypt every entry with the **local** key before writing to the DB.
+///
+/// Rules:
+/// - The local `kdf_salt`, sentinel, and `VaultState::key` are **never**
+///   modified. The master password is a local credential; only entries travel.
+/// - The temporary key is created in a tight scope so `ZeroizeOnDrop` erases
+///   it from memory as soon as decryption is complete.
+/// - Returns the number of entries restored so the frontend can display a
+///   confirmation message without a second round-trip.
 #[tauri::command]
 pub async fn sync_download(
+    master_password: String,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Result<()> {
-    // Step 1 — collect credentials.
-    let (key_bytes, url, anon_key, jwt, user_id) = {
+) -> Result<usize> {
+    use base64::Engine as _;
+
+    // Step 1 — collect credentials (local salt is irrelevant here).
+    let (url, anon_key, jwt, user_id) = {
         let s = state.lock().map_err(|e| AppError(e.to_string()))?;
-        let key = s.key.as_ref().ok_or_else(|| AppError("Vault is locked".into()))?;
+        let _ = vault_open(&s)?; // verify vault is unlocked
         let cfg = s.sync_config.as_ref()
             .ok_or_else(|| AppError("Sync not configured".into()))?;
         let jwt = s.jwt.as_ref()
             .ok_or_else(|| AppError("Not authenticated — call sync_login first".into()))?;
         let uid = s.user_id.as_ref()
             .ok_or_else(|| AppError("Not authenticated".into()))?;
-        (key.0, cfg.supabase_url.clone(), cfg.supabase_anon_key.clone(),
+        (cfg.supabase_url.clone(), cfg.supabase_anon_key.clone(),
          jwt.clone(), uid.clone())
     };
 
     // Step 2 — download (async, no lock).
     let raw = sync::download_vault(&url, &anon_key, &jwt, &user_id).await?;
 
-    // Step 3 — decrypt + deserialize (CPU, no lock).
-    let temp_key = VaultKey(key_bytes);
-    let b64 = String::from_utf8(raw)
+    // Step 3 — parse "{cloud_salt_b64}:{cipher_b64}" format.
+    //   Colon never appears in standard base64, so split_once is unambiguous.
+    let payload_str = String::from_utf8(raw)
         .map_err(|_| AppError("Downloaded blob is not valid UTF-8".into()))?;
-    let json = decrypt(&temp_key, b64.trim())
-        .map_err(|_| AppError("Failed to decrypt downloaded vault — wrong master password?".into()))?;
-    let new_entries = sync::deserialize_vault(&json)?;
+    let (cloud_salt_b64, cipher_b64) = payload_str
+        .trim()
+        .split_once(':')
+        .ok_or_else(|| AppError(
+            "Cloud vault uses an older format. Upload from your main device first, then download.".into()
+        ))?;
 
-    // Step 4 — replace local entries (acquire lock once more).
-    let dir = app_data_dir(&app);
-    let now = sync::unix_now();
+    // Step 4 — derive a TEMPORARY key from the cloud salt + master password,
+    //   use it only for decryption, then let it be zeroized immediately.
+    let cloud_salt = base64::engine::general_purpose::STANDARD
+        .decode(cloud_salt_b64)
+        .map_err(|_| AppError("Invalid salt encoding in cloud vault".into()))?;
+
+    let plaintext_entries = {
+        let temp_key = derive_key(&master_password, &cloud_salt)
+            .map_err(|e| AppError(e.to_string()))?;
+        let json = decrypt(&temp_key, cipher_b64)
+            .map_err(|_| AppError(
+                "Failed to decrypt vault — wrong master password for the downloaded vault.".into()
+            ))?;
+        // `temp_key` is dropped (and zeroized via ZeroizeOnDrop) here.
+        sync::deserialize_vault(&json)?
+    };
+
+    let count = plaintext_entries.len();
+
+    // Step 5 — replace local entries, re-encrypting with the LOCAL key.
+    //   kdf_salt, sentinel, and VaultState::key are NOT touched.
     {
-        // Scope so the immutable borrows through vault_open are dropped
-        // before we need to mutably borrow s.sync_config below.
         let s = state.lock().map_err(|e| AppError(e.to_string()))?;
-        let (db, key) = vault_open(&s)?;
+        let (db, local_key) = vault_open(&s)?;
 
-        for entry in db.list_entries(key)? {
-            db.delete_entry(entry.id)
-                .map_err(|e| AppError(e.to_string()))?;
+        for entry in db.list_entries(local_key)? {
+            db.delete_entry(entry.id).map_err(|e| AppError(e.to_string()))?;
         }
-        for entry in new_entries {
-            db.create_entry(key, entry)?;
+        for entry in plaintext_entries {
+            db.create_entry(local_key, entry)?;
         }
     }
-    // Update timestamp in a second lock acquisition.
+
+    // Step 6 — update last-sync timestamp (key and salt unchanged).
+    let dir = app_data_dir(&app);
+    let now = sync::unix_now();
     let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
     let key_copy = s.key.as_ref().map(|k| k.0);
     if let Some(ref mut cfg) = s.sync_config {
@@ -381,7 +425,8 @@ pub async fn sync_download(
             let _ = sync::save_sync_config(&dir, &VaultKey(kb), cfg);
         }
     }
-    Ok(())
+
+    Ok(count)
 }
 
 /// Return current sync status without mutating state.

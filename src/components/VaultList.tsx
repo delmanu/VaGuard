@@ -154,7 +154,14 @@ export default function VaultList() {
         )}
 
         {/* Sync panel */}
-        {activeView === "sync" && <SyncPanel />}
+        {activeView === "sync" && (
+          <SyncPanel
+            onDownloadComplete={() => {
+              loadEntries();
+              setActiveView("list");
+            }}
+          />
+        )}
 
         {/* List view */}
         {activeView === "list" && (
