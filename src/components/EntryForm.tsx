@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Entry, NewEntry } from "../types";
 import PasswordGenerator from "./PasswordGenerator";
 
@@ -6,15 +7,16 @@ interface Props {
   initial?: Entry;
   onSave: (entry: NewEntry) => void;
   onCancel: () => void;
+  onConflictResolved?: () => void;
 }
 
 function isValidUrl(value: string) {
-  if (!value) return true; // optional
+  if (!value) return true;
   try { new URL(value.startsWith("http") ? value : `https://${value}`); return true; }
   catch { return false; }
 }
 
-export default function EntryForm({ initial, onSave, onCancel }: Props) {
+export default function EntryForm({ initial, onSave, onCancel, onConflictResolved }: Props) {
   const [form, setForm] = useState<NewEntry>({
     title:    initial?.title    ?? "",
     username: initial?.username ?? "",
@@ -42,9 +44,9 @@ export default function EntryForm({ initial, onSave, onCancel }: Props) {
   }
 
   const errors = {
-    title:    !form.title.trim()                           ? "Title is required" : null,
-    url:      touched.url && !isValidUrl(form.url ?? "")   ? "Invalid URL"        : null,
-    password: !form.password.trim()                        ? "Password is required" : null,
+    title:    !form.title.trim()                          ? "Title is required"    : null,
+    url:      touched.url && !isValidUrl(form.url ?? "")  ? "Invalid URL"          : null,
+    password: !form.password.trim()                       ? "Password is required" : null,
   };
   const isValid = !errors.title && !errors.url && !errors.password;
 
@@ -195,6 +197,16 @@ export default function EntryForm({ initial, onSave, onCancel }: Props) {
             style={{ ...inputStyle(false), lineHeight: 1.5 }}
           />
         </Field>
+
+        {/* Conflict resolution panel */}
+        {initial?.conflict && initial?.conflict_data && (
+          <ConflictPanel
+            entryId={initial.id}
+            localEntry={form}
+            cloudJson={initial.conflict_data}
+            onResolved={onConflictResolved ?? (() => {})}
+          />
+        )}
       </form>
 
       {/* Footer */}
@@ -222,6 +234,161 @@ export default function EntryForm({ initial, onSave, onCancel }: Props) {
           }}
         >
           Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Conflict panel ──────────────────────────────────────────────────────── */
+
+const CONFLICT_FIELDS: { key: keyof NewEntry; label: string }[] = [
+  { key: "title",    label: "Title" },
+  { key: "username", label: "Username" },
+  { key: "password", label: "Password" },
+  { key: "url",      label: "URL" },
+  { key: "notes",    label: "Notes" },
+];
+
+function ConflictPanel({
+  entryId,
+  localEntry,
+  cloudJson,
+  onResolved,
+}: {
+  entryId: number;
+  localEntry: NewEntry;
+  cloudJson: string;
+  onResolved: () => void;
+}) {
+  const [resolving, setResolving]     = useState(false);
+  const [showLocalPw, setShowLocalPw] = useState(false);
+  const [showCloudPw, setShowCloudPw] = useState(false);
+
+  let cloud: Partial<NewEntry>;
+  try {
+    cloud = JSON.parse(cloudJson);
+  } catch {
+    return null;
+  }
+
+  const diffFields = CONFLICT_FIELDS.filter(
+    ({ key }) => (localEntry[key] ?? "") !== (cloud[key] ?? "")
+  );
+
+  if (diffFields.length === 0) return null;
+
+  async function resolve(useCloud: boolean) {
+    setResolving(true);
+    try {
+      await invoke("resolve_conflict", { id: entryId, useCloud });
+      onResolved();
+    } catch (e) {
+      console.error("resolve_conflict failed:", e);
+      setResolving(false);
+    }
+  }
+
+  return (
+    <div
+      className="rounded-xl space-y-3 p-4"
+      style={{
+        background: "rgba(251,191,36,0.06)",
+        border: "1px solid rgba(251,191,36,0.3)",
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span style={{ fontSize: 14, lineHeight: 1 }}>⚠</span>
+        <p className="text-xs font-semibold" style={{ color: "var(--c-warn)" }}>
+          Sync conflict
+        </p>
+      </div>
+      <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
+        The following fields differ from the version saved in the cloud:
+      </p>
+
+      <div className="space-y-2">
+        {diffFields.map(({ key, label }) => {
+          const local  = String(localEntry[key] ?? "—");
+          const remote = String(cloud[key]      ?? "—");
+          const masked = key === "password";
+          return (
+            <div
+              key={key}
+              className="rounded-lg p-2 space-y-1"
+              style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
+            >
+              <p className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
+                {label}
+              </p>
+              <div className="flex gap-2 text-xs">
+                <div className="flex-1 space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <p style={{ color: "var(--c-text-3)" }}>Local</p>
+                    {masked && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowLocalPw((v) => !v)}
+                        style={{ color: "var(--c-text-3)" }}
+                      >
+                        {showLocalPw ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    )}
+                  </div>
+                  <p
+                    className="font-mono"
+                    style={{ color: "var(--c-text-1)", wordBreak: "break-all" }}
+                  >
+                    {masked && !showLocalPw ? "•".repeat(Math.min(local.length, 12)) : local}
+                  </p>
+                </div>
+                <div style={{ width: 1, background: "var(--c-border)", flexShrink: 0 }} />
+                <div className="flex-1 space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <p style={{ color: "var(--c-text-3)" }}>Cloud</p>
+                    {masked && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowCloudPw((v) => !v)}
+                        style={{ color: "var(--c-text-3)" }}
+                      >
+                        {showCloudPw ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    )}
+                  </div>
+                  <p
+                    className="font-mono"
+                    style={{ color: "var(--c-text-1)", wordBreak: "break-all" }}
+                  >
+                    {masked && !showCloudPw ? "•".repeat(Math.min(remote.length, 12)) : remote}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={resolving}
+          onClick={() => resolve(false)}
+          className="flex-1 py-2 rounded-lg text-xs font-medium"
+          style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
+        >
+          Keep local
+        </button>
+        <button
+          type="button"
+          disabled={resolving}
+          onClick={() => resolve(true)}
+          className="flex-1 py-2 rounded-lg text-xs font-medium"
+          style={{ background: "rgba(251,191,36,0.18)", color: "var(--c-warn)" }}
+        >
+          Use cloud version
         </button>
       </div>
     </div>

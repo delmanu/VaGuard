@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { SyncStatus } from "../types";
+import type { DownloadResult, SyncStatus } from "../types";
 
 const EMAIL_NOT_CONFIRMED = "__email_not_confirmed__";
+const COOLDOWN_SECS = 5;
 
 export default function SyncPanel({
   onDownloadComplete,
+  onShowConflicts,
 }: {
-  onDownloadComplete: (count: number) => void;
+  onDownloadComplete: (result: DownloadResult) => void;
+  onShowConflicts: () => void;
 }) {
   const [status, setStatus]       = useState<SyncStatus | null>(null);
   const [loading, setLoading]     = useState(true);
-  const [busy, setBusy]           = useState<string | null>(null); // label of in-progress action
+  const [busy, setBusy]           = useState<string | null>(null);
   const [error, setError]         = useState<string | null>(null);
   const [success, setSuccess]     = useState<string | null>(null);
+  const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
+
+  // Safety countdown — prevents accidental clicks on entry
+  const [cooldown, setCooldown]   = useState(COOLDOWN_SECS);
 
   // Setup form state
   const [formUrl, setFormUrl]       = useState("");
@@ -22,16 +29,23 @@ export default function SyncPanel({
   const [formPw, setFormPw]         = useState("");
   const [showFormPw, setShowFormPw] = useState(false);
 
-  // Login form (when configured but not authenticated)
-  const [loginPw, setLoginPw]   = useState("");
+  // Login form
+  const [loginPw, setLoginPw]         = useState("");
   const [showLoginPw, setShowLoginPw] = useState(false);
 
-  // Download confirmation modal — asks for master password
+  // Download modal
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [downloadMasterPw, setDownloadMasterPw]   = useState("");
   const [showDownloadPw, setShowDownloadPw]       = useState(false);
 
   useEffect(() => { loadStatus(); }, []);
+
+  // Countdown tick
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   async function loadStatus() {
     setLoading(true);
@@ -47,6 +61,7 @@ export default function SyncPanel({
   async function run(label: string, fn: () => Promise<void>) {
     setError(null);
     setSuccess(null);
+    setDownloadResult(null);
     setBusy(label);
     try {
       await fn();
@@ -60,9 +75,7 @@ export default function SyncPanel({
   }
 
   function friendlyError(raw: string): string {
-    if (raw.toLowerCase().includes("email not confirmed")) {
-      return EMAIL_NOT_CONFIRMED;
-    }
+    if (raw.toLowerCase().includes("email not confirmed")) return EMAIL_NOT_CONFIRMED;
     return raw;
   }
 
@@ -100,16 +113,21 @@ export default function SyncPanel({
     setDownloadModalOpen(false);
     setError(null);
     setSuccess(null);
+    setDownloadResult(null);
     setBusy("Downloading");
     try {
-      const count = await invoke<number>("sync_download", {
+      const result = await invoke<DownloadResult>("sync_download", {
         masterPassword: downloadMasterPw,
       });
       await loadStatus();
-      const noun = count === 1 ? "entry" : "entries";
-      setSuccess(`✓ ${count} ${noun} restored successfully.`);
-      // Give the user a moment to read the message, then switch to the list.
-      setTimeout(() => onDownloadComplete(count), 1800);
+
+      const addedLabel = `${result.added} ${result.added === 1 ? "entry" : "entries"} added`;
+      const conflictLabel = result.conflicts > 0
+        ? `, ${result.conflicts} conflict${result.conflicts !== 1 ? "s" : ""} detected`
+        : "";
+      setSuccess(`✓ ${addedLabel}${conflictLabel}`);
+      setDownloadResult(result);
+      onDownloadComplete(result);
     } catch (e) {
       setError(friendlyError(String(e)));
     } finally {
@@ -119,14 +137,22 @@ export default function SyncPanel({
 
   async function handleDisconnect() {
     if (!confirm("Remove Supabase configuration and sign out?")) return;
-    await run("Disconnecting", async () => {
-      await invoke("sync_clear_config");
-    });
+    await run("Disconnecting", async () => { await invoke("sync_clear_config"); });
   }
 
   async function handleLogout() {
     await run("Signing out", () => invoke("sync_logout"));
   }
+
+  function handleShowConflicts() {
+    setDownloadResult(null);
+    setSuccess(null);
+    onShowConflicts();
+  }
+
+  const syncDisabled = cooldown > 0 || !!busy;
+  const uploadLabel  = cooldown > 0 ? `Sync now (${cooldown}s)` : "Sync now (upload)";
+  const downloadLabel = cooldown > 0 ? `Download (${cooldown}s)` : "Download from cloud";
 
   if (loading) {
     return (
@@ -167,9 +193,10 @@ export default function SyncPanel({
               Download from cloud
             </p>
             <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-              This will replace your local vault with the cloud version.
-              Enter your <strong>master password</strong> so VaGuard can re-derive
-              the correct encryption key.
+              New cloud entries will be added to your local vault. Conflicting
+              entries will be flagged for review — nothing is deleted automatically.
+              Enter your <strong>master password</strong> so VaGuard can decrypt
+              the cloud vault.
             </p>
           </div>
 
@@ -216,14 +243,15 @@ export default function SyncPanel({
             <button
               type="submit"
               className="flex-1 py-2 rounded-lg text-xs font-semibold"
-              style={{ background: "var(--c-warn)", color: "white" }}
+              style={{ background: "var(--c-accent)", color: "white" }}
             >
-              Download &amp; replace
+              Merge &amp; download
             </button>
           </div>
         </form>
       </div>
     )}
+
     <div
       className="h-full overflow-y-auto px-8 py-6 fade-in"
       style={{ maxWidth: 560, margin: "0 auto" }}
@@ -258,14 +286,23 @@ export default function SyncPanel({
       )}
       {success && (
         <div
-          className="mb-4 p-3 rounded-lg text-xs"
+          className="mb-4 p-3 rounded-lg text-xs flex items-center justify-between gap-2"
           style={{
             background: "rgba(74,222,128,0.1)",
             color: "var(--c-success)",
             border: "1px solid rgba(74,222,128,0.2)",
           }}
         >
-          {success}
+          <span>{success}</span>
+          {downloadResult && downloadResult.conflicts > 0 && (
+            <button
+              onClick={handleShowConflicts}
+              className="shrink-0 text-xs underline"
+              style={{ color: "var(--c-accent)" }}
+            >
+              View conflicts →
+            </button>
+          )}
         </div>
       )}
 
@@ -273,10 +310,7 @@ export default function SyncPanel({
       {!status?.is_configured && (
         <>
           <Steps />
-          <form
-            onSubmit={handleConfigure}
-            className="mt-6 space-y-3"
-          >
+          <form onSubmit={handleConfigure} className="mt-6 space-y-3">
             <SyncField
               label="Supabase Project URL"
               placeholder="https://xxxx.supabase.co"
@@ -410,13 +444,10 @@ export default function SyncPanel({
         <div className="space-y-5">
           <ConfigBadge status={status} />
 
-          {/* Sync status */}
+          {/* Last synced */}
           <div
             className="p-4 rounded-xl space-y-3"
-            style={{
-              background: "var(--c-surface-1)",
-              border: "1px solid var(--c-border)",
-            }}
+            style={{ background: "var(--c-surface-1)", border: "1px solid var(--c-border)" }}
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
@@ -428,27 +459,34 @@ export default function SyncPanel({
                   : "Never"}
               </span>
             </div>
+            {cooldown > 0 && (
+              <p className="text-xs" style={{ color: "var(--c-text-3)" }}>
+                Buttons available in {cooldown}s…
+              </p>
+            )}
           </div>
 
           {/* Actions */}
           <div className="space-y-2">
             <SyncActionButton
-              label="Sync now (upload)"
+              label={uploadLabel}
               description="Encrypt and upload your local vault to the cloud"
               icon="↑"
               color="var(--c-accent)"
               busy={busy === "Uploading"}
               busyLabel="Uploading…"
               onClick={handleUpload}
+              disabled={syncDisabled}
             />
             <SyncActionButton
-              label="Download from cloud"
-              description="Replace local vault with the cloud version"
+              label={downloadLabel}
+              description="Merge cloud entries into your local vault"
               icon="↓"
               color="var(--c-warn)"
               busy={busy === "Downloading"}
               busyLabel="Downloading…"
               onClick={handleDownload}
+              disabled={syncDisabled}
               warn
             />
           </div>
@@ -506,13 +544,13 @@ function Steps() {
         },
         {
           n: 2,
-          text: 'Copy your Project URL and anon key from ',
+          text: "Copy your Project URL and anon key from ",
           link: "https://supabase.com/dashboard/project/_/settings/api",
           linkLabel: "Settings → API",
         },
         {
           n: 3,
-          text: 'Create a private Storage bucket named ',
+          text: "Create a private Storage bucket named ",
           code: "vaults",
           extra: " with RLS enabled.",
         },
@@ -589,7 +627,7 @@ function ConfigBadge({ status }: { status: SyncStatus }) {
 }
 
 function SyncActionButton({
-  label, description, icon, color, busy, busyLabel, onClick, warn,
+  label, description, icon, color, busy, busyLabel, onClick, warn, disabled,
 }: {
   label: string;
   description: string;
@@ -599,17 +637,19 @@ function SyncActionButton({
   busyLabel: string;
   onClick: () => void;
   warn?: boolean;
+  disabled?: boolean;
 }) {
+  const isDisabled = busy || !!disabled;
   return (
     <button
       onClick={onClick}
-      disabled={busy}
+      disabled={isDisabled}
       className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors"
       style={{
         background: "var(--c-surface-1)",
         border: `1px solid ${warn ? "rgba(251,191,36,0.25)" : "var(--c-border)"}`,
-        cursor: busy ? "default" : "pointer",
-        opacity: busy ? 0.7 : 1,
+        cursor: isDisabled ? "default" : "pointer",
+        opacity: isDisabled ? 0.6 : 1,
       }}
     >
       <span
@@ -728,7 +768,6 @@ function EmailNotConfirmedBanner() {
       </div>
 
       <div className="space-y-2 pl-6">
-        {/* Option A */}
         <div
           className="p-3 rounded-lg"
           style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
@@ -742,7 +781,6 @@ function EmailNotConfirmedBanner() {
           </p>
         </div>
 
-        {/* Option B */}
         <div
           className="p-3 rounded-lg"
           style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}

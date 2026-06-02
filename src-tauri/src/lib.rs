@@ -34,6 +34,7 @@ pub fn run() {
             commands::sync_download,
             commands::sync_get_status,
             commands::sync_clear_config,
+            commands::resolve_conflict,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

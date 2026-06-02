@@ -1,17 +1,15 @@
 /// Zero-knowledge sync module.
 ///
-/// This module handles all Supabase communication. The server only ever
-/// receives AES-256-GCM encrypted blobs — it never sees plaintext.
-///
-/// All functions are pure (no Tauri state). Commands in `commands.rs`
-/// extract the needed data from `VaultState`, release the lock, then
-/// call these functions.
+/// The server only ever receives AES-256-GCM encrypted blobs — it never sees
+/// plaintext. All functions are pure (no Tauri state). Commands in
+/// `commands.rs` extract the needed data from `VaultState`, release the lock,
+/// then call these functions.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{decrypt, encrypt, VaultKey};
-use crate::db::{Entry, NewEntry};
+use crate::db::Entry;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -36,6 +34,24 @@ pub struct SyncStatus {
     pub last_sync_timestamp: i64,
 }
 
+/// A vault entry as it travels in the encrypted sync blob (v2 format).
+///
+/// `#[serde(default)]` on `sync_id` and `updated_at` lets us gracefully
+/// deserialize v1 blobs (which lacked these fields) — commands.rs then
+/// detects the empty sync_id and returns an actionable error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudEntry {
+    #[serde(default)]
+    pub sync_id: String,
+    pub title: String,
+    pub username: String,
+    pub password: String,
+    pub url: Option<String>,
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
 // ── Internal types ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -54,16 +70,7 @@ struct AuthUser {
 struct VaultExport {
     version: u32,
     exported_at: i64,
-    entries: Vec<EntryExport>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct EntryExport {
-    title: String,
-    username: String,
-    password: String,
-    url: Option<String>,
-    notes: Option<String>,
+    entries: Vec<CloudEntry>,
 }
 
 // ── Config persistence ────────────────────────────────────────────────────────
@@ -156,8 +163,6 @@ pub enum SignupResult {
 }
 
 /// Create a new Supabase Auth account.
-/// Returns `SignupResult::AlreadyExists` instead of an error when the
-/// email is already taken so the caller can fall through to login.
 pub async fn auth_signup(
     url: &str,
     anon_key: &str,
@@ -183,7 +188,6 @@ pub async fn auth_signup(
 
     let body: serde_json::Value = resp.json().await.unwrap_or_default();
 
-    // Collect every string field Supabase might use for the message.
     let msg = body.get("msg")
         .or_else(|| body.get("message"))
         .or_else(|| body.get("error_description"))
@@ -195,8 +199,6 @@ pub async fn auth_signup(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    // "email_exists", "user_already_exists", or any message mentioning
-    // "already registered" / "already exists" means we can skip signup.
     let already_exists =
         error_code.contains("exist") ||
         msg.to_lowercase().contains("already") ||
@@ -293,44 +295,53 @@ pub async fn download_vault(
     }
 }
 
+/// Check whether a vault blob already exists for `user_id` without
+/// downloading it. Returns `Ok(false)` on 404, `Ok(true)` on 200, and
+/// `Err` for unexpected network errors.
+pub async fn check_vault_exists(
+    url: &str,
+    anon_key: &str,
+    jwt: &str,
+    user_id: &str,
+) -> Result<bool, String> {
+    match download_vault(url, anon_key, jwt, user_id).await {
+        Ok(_) => Ok(true),
+        Err(e) if e.contains("No vault found") => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 // ── Vault serialization ───────────────────────────────────────────────────────
 
-/// Serialize all vault entries to JSON bytes (plaintext).
+/// Serialize all vault entries to JSON bytes (plaintext, v2 format with UUIDs).
 /// The caller must encrypt this before sending anywhere.
 pub fn serialize_vault(entries: &[Entry]) -> Result<Vec<u8>, String> {
     let export = VaultExport {
-        version: 1,
+        version: 2,
         exported_at: unix_now(),
         entries: entries
             .iter()
-            .map(|e| EntryExport {
-                title: e.title.clone(),
-                username: e.username.clone(),
-                password: e.password.clone(), // already decrypted in Entry
-                url: e.url.clone(),
-                notes: e.notes.clone(),
+            .map(|e| CloudEntry {
+                sync_id:    e.sync_id.clone(),
+                title:      e.title.clone(),
+                username:   e.username.clone(),
+                password:   e.password.clone(),
+                url:        e.url.clone(),
+                notes:      e.notes.clone(),
+                updated_at: e.updated_at.clone(),
             })
             .collect(),
     };
     serde_json::to_vec(&export).map_err(|e| e.to_string())
 }
 
-/// Deserialize vault JSON bytes into a list of `NewEntry` values ready for
-/// insertion. Passwords are re-encrypted by `db.create_entry`.
-pub fn deserialize_vault(data: &[u8]) -> Result<Vec<NewEntry>, String> {
+/// Deserialize vault JSON bytes into a list of `CloudEntry` values ready for
+/// the merge algorithm. Passwords are plaintext here — re-encrypted by the
+/// caller once they reach the local DB.
+pub fn deserialize_vault(data: &[u8]) -> Result<Vec<CloudEntry>, String> {
     let export: VaultExport =
         serde_json::from_slice(data).map_err(|e| format!("Invalid vault format: {e}"))?;
-    Ok(export
-        .entries
-        .into_iter()
-        .map(|e| NewEntry {
-            title: e.title,
-            username: e.username,
-            password: e.password,
-            url: e.url,
-            notes: e.notes,
-        })
-        .collect())
+    Ok(export.entries)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
