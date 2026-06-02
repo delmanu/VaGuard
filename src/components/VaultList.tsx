@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Entry, NewEntry } from "../types";
+import type { DownloadResult, Entry, NewEntry } from "../types";
 import EntryForm from "./EntryForm";
 import SyncPanel from "./SyncPanel";
 
 type ActiveView = "list" | "sync";
 
 export default function VaultList() {
-  const [entries, setEntries]     = useState<Entry[]>([]);
-  const [search, setSearch]       = useState("");
-  const [editing, setEditing]     = useState<Entry | null>(null);
-  const [creating, setCreating]   = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>("list");
-  const [error, setError]         = useState<string | null>(null);
-  const searchRef                 = useRef<HTMLInputElement>(null);
+  const [entries, setEntries]           = useState<Entry[]>([]);
+  const [search, setSearch]             = useState("");
+  const [editing, setEditing]           = useState<Entry | null>(null);
+  const [creating, setCreating]         = useState(false);
+  const [activeView, setActiveView]     = useState<ActiveView>("list");
+  const [showConflictsOnly, setShowConflictsOnly] = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const searchRef                       = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadEntries(); }, []);
 
-  // Global shortcut: Ctrl+F focuses search
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
@@ -37,7 +37,6 @@ export default function VaultList() {
     }
   }
 
-
   async function handleSave(entry: NewEntry) {
     try {
       if (editing) {
@@ -53,11 +52,14 @@ export default function VaultList() {
     }
   }
 
-  const filtered = entries.filter(
-    (e) =>
+  const conflictCount = entries.filter((e) => e.conflict).length;
+
+  const filtered = entries.filter((e) => {
+    const matchesSearch =
       e.title.toLowerCase().includes(search.toLowerCase()) ||
-      e.username.toLowerCase().includes(search.toLowerCase()),
-  );
+      e.username.toLowerCase().includes(search.toLowerCase());
+    return showConflictsOnly ? matchesSearch && e.conflict : matchesSearch;
+  });
 
   return (
     <div className="flex" style={{ height: "100%", overflow: "hidden" }}>
@@ -96,9 +98,42 @@ export default function VaultList() {
           </div>
         </div>
 
+        {/* Conflict filter bar */}
+        {showConflictsOnly && (
+          <div
+            className="mx-3 mb-2 px-2 py-1.5 rounded-lg flex items-center justify-between"
+            style={{
+              background: "rgba(248,113,113,0.08)",
+              border: "1px solid rgba(248,113,113,0.25)",
+            }}
+          >
+            <span className="text-xs" style={{ color: "var(--c-danger)" }}>
+              Showing conflicts only
+            </span>
+            <button
+              onClick={() => setShowConflictsOnly(false)}
+              className="text-xs ml-1"
+              style={{ color: "var(--c-danger)", opacity: 0.7 }}
+              title="Clear filter"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Count */}
         <div className="px-3 pb-2 text-xs" style={{ color: "var(--c-text-3)" }}>
           {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
+          {conflictCount > 0 && !showConflictsOnly && (
+            <button
+              onClick={() => setShowConflictsOnly(true)}
+              className="ml-2"
+              style={{ color: "var(--c-danger)", textDecoration: "underline" }}
+              title="Filter to conflict entries"
+            >
+              {conflictCount} conflict{conflictCount !== 1 ? "s" : ""}
+            </button>
+          )}
         </div>
 
         {/* List */}
@@ -116,7 +151,11 @@ export default function VaultList() {
             <div className="flex flex-col items-center pt-10 pb-4 px-4 text-center">
               <span style={{ fontSize: 32 }}>🔍</span>
               <p className="text-xs mt-2" style={{ color: "var(--c-text-3)" }}>
-                {search ? "No entries match your search" : "No entries yet"}
+                {search
+                  ? "No entries match your search"
+                  : showConflictsOnly
+                  ? "No conflict entries"
+                  : "No entries yet"}
               </p>
             </div>
           )}
@@ -147,7 +186,11 @@ export default function VaultList() {
         {error && (
           <div
             className="m-4 p-3 rounded-lg text-sm"
-            style={{ background: "rgba(248,113,113,0.1)", color: "var(--c-danger)", border: "1px solid rgba(248,113,113,0.2)" }}
+            style={{
+              background: "rgba(248,113,113,0.1)",
+              color: "var(--c-danger)",
+              border: "1px solid rgba(248,113,113,0.2)",
+            }}
           >
             {error}
           </div>
@@ -156,8 +199,14 @@ export default function VaultList() {
         {/* Sync panel */}
         {activeView === "sync" && (
           <SyncPanel
-            onDownloadComplete={() => {
+            onDownloadComplete={(result: DownloadResult) => {
               loadEntries();
+              if (result.conflicts === 0) {
+                setTimeout(() => setActiveView("list"), 1800);
+              }
+            }}
+            onShowConflicts={() => {
+              setShowConflictsOnly(true);
               setActiveView("list");
             }}
           />
@@ -166,7 +215,6 @@ export default function VaultList() {
         {/* List view */}
         {activeView === "list" && (
           <>
-            {/* Detail / empty state */}
             {!editing && !creating && (
               <EmptyDetail hasEntries={entries.length > 0} />
             )}
@@ -177,33 +225,39 @@ export default function VaultList() {
                 initial={editing ?? undefined}
                 onSave={handleSave}
                 onCancel={() => { setEditing(null); setCreating(false); }}
+                onConflictResolved={() => {
+                  loadEntries();
+                  setEditing(null);
+                }}
               />
             )}
           </>
         )}
 
         {/* FAB — only when no panel is open */}
-        {activeView === "list" && !creating && !editing && <button
-          onClick={() => { setEditing(null); setCreating(true); }}
-          className="absolute bottom-6 right-6 flex items-center justify-center rounded-full shadow-lg transition-all duration-150"
-          style={{
-            width: 48,
-            height: 48,
-            background: "var(--c-accent)",
-            color: "white",
-            fontSize: 24,
-            lineHeight: 1,
-          }}
-          title="New entry"
-          onMouseEnter={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent-h)")
-          }
-          onMouseLeave={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent)")
-          }
-        >
-          +
-        </button>}
+        {activeView === "list" && !creating && !editing && (
+          <button
+            onClick={() => { setEditing(null); setCreating(true); }}
+            className="absolute bottom-6 right-6 flex items-center justify-center rounded-full shadow-lg transition-all duration-150"
+            style={{
+              width: 48,
+              height: 48,
+              background: "var(--c-accent)",
+              color: "white",
+              fontSize: 24,
+              lineHeight: 1,
+            }}
+            title="New entry"
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent-h)")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent)")
+            }
+          >
+            +
+          </button>
+        )}
       </div>
     </div>
   );
@@ -246,8 +300,26 @@ function SidebarItem({
           (e.currentTarget as HTMLButtonElement).style.background = "transparent";
       }}
     >
-      {/* Favicon placeholder */}
-      <Avatar title={entry.title} />
+      {/* Avatar with conflict dot */}
+      <div className="relative shrink-0">
+        <Avatar title={entry.title} />
+        {entry.conflict && (
+          <span
+            title="Esta entrada tiene un conflicto con la versión en la nube"
+            style={{
+              position: "absolute",
+              top: -2,
+              right: -2,
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: "var(--c-danger)",
+              border: "2px solid var(--c-surface-1)",
+              display: "block",
+            }}
+          />
+        )}
+      </div>
 
       {/* Text */}
       <div className="flex-1 min-w-0">
@@ -291,7 +363,7 @@ function Avatar({ title }: { title: string }) {
 
   return (
     <span
-      className="flex items-center justify-center rounded-lg shrink-0 text-white font-semibold text-sm"
+      className="flex items-center justify-center rounded-lg text-white font-semibold text-sm"
       style={{ width: 32, height: 32, background: bg, opacity: 0.9 }}
     >
       {letter}

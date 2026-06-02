@@ -38,6 +38,17 @@ impl<E: std::fmt::Display> From<E> for AppError {
 
 type Result<T> = std::result::Result<T, AppError>;
 
+// ── Result types ─────────────────────────────────────────────────────────────
+
+/// Summary returned to the frontend after a successful sync download.
+#[derive(Debug, Serialize)]
+pub struct DownloadResult {
+    /// Entries that existed in the cloud but not locally — inserted.
+    pub added: usize,
+    /// Entries that exist in both but with differing content — flagged.
+    pub conflicts: usize,
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
@@ -203,8 +214,6 @@ pub async fn sync_configure(
     };
 
     // Step 2 — try login first. If it fails, attempt signup and retry.
-    // Signup returning AlreadyExists is treated the same as Created —
-    // in both cases we fall through to a second login attempt.
     let (jwt, user_id) =
         match sync::auth_login(&url, &anon_key, &email, &supabase_password).await {
             Ok(result) => result,
@@ -212,7 +221,6 @@ pub async fn sync_configure(
                 use sync::SignupResult;
                 match sync::auth_signup(&url, &anon_key, &email, &supabase_password).await {
                     Ok(SignupResult::Created) | Ok(SignupResult::AlreadyExists) => {
-                        // Account exists or was just created — retry login.
                         sync::auth_login(&url, &anon_key, &email, &supabase_password)
                             .await
                             .map_err(|e| AppError(format!(
@@ -282,8 +290,10 @@ pub fn sync_logout(state: State<'_, AppState>) -> Result<()> {
 /// Serialize, encrypt, and upload the vault to Supabase Storage.
 ///
 /// Upload format: `{kdf_salt_b64}:{aes_gcm_ciphertext_b64}`
-/// The salt travels in plaintext (it is not secret) so any device can derive
-/// the correct key before decrypting.
+/// The salt travels in plaintext so any device can derive the correct key.
+///
+/// Guard: if the local vault is empty AND a blob already exists in the cloud,
+/// the upload is blocked to prevent accidentally overwriting cloud data.
 #[tauri::command]
 pub async fn sync_upload(
     app: tauri::AppHandle,
@@ -307,6 +317,18 @@ pub async fn sync_upload(
          jwt.clone(), uid.clone())
     };
 
+    // Guard: block uploading an empty vault over existing cloud data.
+    if entries.is_empty() {
+        let cloud_has_data = sync::check_vault_exists(&url, &anon_key, &jwt, &user_id)
+            .await
+            .unwrap_or(false);
+        if cloud_has_data {
+            return Err(AppError(
+                "El vault local está vacío. Descarga primero para no perder los datos en la nube.".into()
+            ));
+        }
+    }
+
     // Step 2 — serialize + encrypt (CPU, no lock needed).
     let json = sync::serialize_vault(&entries)?;
     let temp_key = VaultKey(key_bytes);
@@ -323,7 +345,6 @@ pub async fn sync_upload(
     let now = sync::unix_now();
     let dir = app_data_dir(&app);
     let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
-    // Extract key bytes before the mutable borrow of sync_config.
     let key_copy = s.key.as_ref().map(|k| k.0);
     if let Some(ref mut cfg) = s.sync_config {
         cfg.last_sync_timestamp = now;
@@ -334,23 +355,23 @@ pub async fn sync_upload(
     Ok(())
 }
 
-/// Download the encrypted vault from Supabase, decrypt it with a temporary
-/// key derived from the cloud salt + supplied master password, then
-/// re-encrypt every entry with the **local** key before writing to the DB.
+/// Download the encrypted vault from Supabase and merge it into the local DB.
 ///
-/// Rules:
-/// - The local `kdf_salt`, sentinel, and `VaultState::key` are **never**
-///   modified. The master password is a local credential; only entries travel.
-/// - The temporary key is created in a tight scope so `ZeroizeOnDrop` erases
-///   it from memory as soon as decryption is complete.
-/// - Returns the number of entries restored so the frontend can display a
-///   confirmation message without a second round-trip.
+/// Merge rules (additive — entries are never deleted automatically):
+///   A. UUID not in local  → insert (new entry from another device)
+///   B. UUID matches, content identical → skip
+///   C. UUID matches, content differs → mark `conflict = true`, store cloud
+///      snapshot in `conflict_data`; local version is preserved unchanged
+///
+/// The local `kdf_salt`, sentinel, and `VaultState::key` are never modified.
+/// The temporary key derived from the cloud salt is zeroized immediately after
+/// decryption (via `ZeroizeOnDrop`).
 #[tauri::command]
 pub async fn sync_download(
     master_password: String,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Result<usize> {
+) -> Result<DownloadResult> {
     use base64::Engine as _;
 
     // Step 1 — collect credentials (local salt is irrelevant here).
@@ -371,7 +392,6 @@ pub async fn sync_download(
     let raw = sync::download_vault(&url, &anon_key, &jwt, &user_id).await?;
 
     // Step 3 — parse "{cloud_salt_b64}:{cipher_b64}" format.
-    //   Colon never appears in standard base64, so split_once is unambiguous.
     let payload_str = String::from_utf8(raw)
         .map_err(|_| AppError("Downloaded blob is not valid UTF-8".into()))?;
     let (cloud_salt_b64, cipher_b64) = payload_str
@@ -381,13 +401,12 @@ pub async fn sync_download(
             "Cloud vault uses an older format. Upload from your main device first, then download.".into()
         ))?;
 
-    // Step 4 — derive a TEMPORARY key from the cloud salt + master password,
-    //   use it only for decryption, then let it be zeroized immediately.
+    // Step 4 — derive a TEMPORARY key from the cloud salt + master password.
     let cloud_salt = base64::engine::general_purpose::STANDARD
         .decode(cloud_salt_b64)
         .map_err(|_| AppError("Invalid salt encoding in cloud vault".into()))?;
 
-    let plaintext_entries = {
+    let cloud_entries = {
         let temp_key = derive_key(&master_password, &cloud_salt)
             .map_err(|e| AppError(e.to_string()))?;
         let json = decrypt(&temp_key, cipher_b64)
@@ -398,25 +417,70 @@ pub async fn sync_download(
         sync::deserialize_vault(&json)?
     };
 
-    let count = plaintext_entries.len();
+    // Guard: v1 blobs have no sync_id — merging them would create duplicates.
+    if cloud_entries.iter().any(|e| e.sync_id.is_empty()) {
+        return Err(AppError(
+            "El vault en la nube usa un formato antiguo sin identificadores únicos. \
+             Sube primero desde tu dispositivo principal para actualizarlo.".into()
+        ));
+    }
 
-    // Step 5 — replace local entries, re-encrypting with the LOCAL key.
-    //   kdf_salt, sentinel, and VaultState::key are NOT touched.
+    // Step 5 — additive merge.
+    let mut added = 0usize;
+    let mut conflicts = 0usize;
+
     {
         let s = state.lock().map_err(|e| AppError(e.to_string()))?;
         let (db, local_key) = vault_open(&s)?;
 
-        for entry in db.list_entries(local_key)? {
-            db.delete_entry(entry.id).map_err(|e| AppError(e.to_string()))?;
-        }
-        for entry in plaintext_entries {
-            db.create_entry(local_key, entry)?;
+        for cloud in &cloud_entries {
+            match db.find_by_sync_id(local_key, &cloud.sync_id) {
+                Err(e) => return Err(AppError(e.to_string())),
+
+                // CASO A — new entry from cloud, insert locally.
+                Ok(None) => {
+                    db.insert_synced_entry(
+                        local_key,
+                        &cloud.sync_id,
+                        &cloud.title,
+                        &cloud.username,
+                        &cloud.password,
+                        cloud.url.as_deref(),
+                        cloud.notes.as_deref(),
+                    ).map_err(|e| AppError(e.to_string()))?;
+                    added += 1;
+                }
+
+                Ok(Some(local)) => {
+                    let same = local.title    == cloud.title
+                        && local.username == cloud.username
+                        && local.password == cloud.password
+                        && local.url      == cloud.url
+                        && local.notes    == cloud.notes;
+
+                    if same {
+                        // CASO B — identical, nothing to do.
+                    } else {
+                        // CASO C — conflict: preserve local, flag for resolution.
+                        let snapshot = serde_json::json!({
+                            "title":    cloud.title,
+                            "username": cloud.username,
+                            "password": cloud.password,
+                            "url":      cloud.url,
+                            "notes":    cloud.notes,
+                        }).to_string();
+                        db.mark_conflict(local.id, &snapshot)
+                            .map_err(|e| AppError(e.to_string()))?;
+                        conflicts += 1;
+                    }
+                }
+            }
         }
     }
 
-    // Step 6 — update last-sync timestamp (key and salt unchanged).
-    let dir = app_data_dir(&app);
+    // Step 6 — update last-sync timestamp.
     let now = sync::unix_now();
+    let dir = app_data_dir(&app);
     let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
     let key_copy = s.key.as_ref().map(|k| k.0);
     if let Some(ref mut cfg) = s.sync_config {
@@ -426,7 +490,46 @@ pub async fn sync_download(
         }
     }
 
-    Ok(count)
+    Ok(DownloadResult { added, conflicts })
+}
+
+/// Resolve a sync conflict on a given entry.
+///
+/// - `use_cloud = false` — keep the local version; clear the conflict flag.
+/// - `use_cloud = true`  — overwrite the local entry with the cloud snapshot
+///   stored in `conflict_data`, then clear the conflict flag.
+#[tauri::command]
+pub fn resolve_conflict(
+    id: i64,
+    use_cloud: bool,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let s = state.lock().map_err(|e| AppError(e.to_string()))?;
+    let (db, key) = vault_open(&s)?;
+
+    if use_cloud {
+        let entries = db.list_entries(key)?;
+        let entry = entries.iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| AppError("Entry not found".into()))?;
+
+        let cloud: serde_json::Value = serde_json::from_str(
+            entry.conflict_data.as_deref().unwrap_or("{}")
+        ).map_err(|e| AppError(e.to_string()))?;
+
+        let cloud_entry = NewEntry {
+            title:    cloud["title"].as_str().unwrap_or("").to_string(),
+            username: cloud["username"].as_str().unwrap_or("").to_string(),
+            password: cloud["password"].as_str().unwrap_or("").to_string(),
+            url:      cloud["url"].as_str().map(|s| s.to_string()),
+            notes:    cloud["notes"].as_str().map(|s| s.to_string()),
+        };
+
+        db.update_entry(key, id, cloud_entry)?;
+    }
+
+    db.clear_conflict(id).map_err(|e| AppError(e.to_string()))?;
+    Ok(())
 }
 
 /// Return current sync status without mutating state.
