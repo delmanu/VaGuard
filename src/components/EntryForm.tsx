@@ -261,7 +261,9 @@ function ConflictPanel({
   cloudJson: string;
   onResolved: () => void;
 }) {
-  const [resolving, setResolving] = useState(false);
+  const [resolving, setResolving]     = useState(false);
+  const [showLocalPw, setShowLocalPw] = useState(false);
+  const [showCloudPw, setShowCloudPw] = useState(false);
 
   let cloud: Partial<NewEntry>;
   try {
@@ -321,22 +323,46 @@ function ConflictPanel({
               </p>
               <div className="flex gap-2 text-xs">
                 <div className="flex-1 space-y-0.5">
-                  <p style={{ color: "var(--c-text-3)" }}>Local</p>
+                  <div className="flex items-center justify-between">
+                    <p style={{ color: "var(--c-text-3)" }}>Local</p>
+                    {masked && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowLocalPw((v) => !v)}
+                        style={{ color: "var(--c-text-3)" }}
+                      >
+                        {showLocalPw ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    )}
+                  </div>
                   <p
                     className="font-mono"
                     style={{ color: "var(--c-text-1)", wordBreak: "break-all" }}
                   >
-                    {masked ? "•".repeat(Math.min(local.length, 12)) : local}
+                    {masked && !showLocalPw ? "•".repeat(Math.min(local.length, 12)) : local}
                   </p>
                 </div>
                 <div style={{ width: 1, background: "var(--c-border)", flexShrink: 0 }} />
                 <div className="flex-1 space-y-0.5">
-                  <p style={{ color: "var(--c-text-3)" }}>Cloud</p>
+                  <div className="flex items-center justify-between">
+                    <p style={{ color: "var(--c-text-3)" }}>Cloud</p>
+                    {masked && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowCloudPw((v) => !v)}
+                        style={{ color: "var(--c-text-3)" }}
+                      >
+                        {showCloudPw ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    )}
+                  </div>
                   <p
                     className="font-mono"
                     style={{ color: "var(--c-text-1)", wordBreak: "break-all" }}
                   >
-                    {masked ? "•".repeat(Math.min(remote.length, 12)) : remote}
+                    {masked && !showCloudPw ? "•".repeat(Math.min(remote.length, 12)) : remote}
                   </p>
                 </div>
               </div>
