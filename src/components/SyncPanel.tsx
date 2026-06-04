@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DownloadResult, SyncStatus } from "../types";
+import { useConfirm } from "./ConfirmDialog";
 
 const EMAIL_NOT_CONFIRMED = "__email_not_confirmed__";
 const COOLDOWN_SECS = 5;
@@ -12,6 +13,7 @@ export default function SyncPanel({
   onDownloadComplete: (result: DownloadResult) => void;
   onShowConflicts: () => void;
 }) {
+  const { confirm, dialog } = useConfirm();
   const [status, setStatus]       = useState<SyncStatus | null>(null);
   const [loading, setLoading]     = useState(true);
   const [busy, setBusy]           = useState<string | null>(null);
@@ -136,7 +138,13 @@ export default function SyncPanel({
   }
 
   async function handleDisconnect() {
-    if (!confirm("Remove Supabase configuration and sign out?")) return;
+    const ok = await confirm({
+      title: "Unlink account",
+      message: "This will remove your Supabase configuration and sign you out. You can reconnect at any time.",
+      confirmLabel: "Unlink",
+      variant: "danger",
+    });
+    if (!ok) return;
     await run("Disconnecting", async () => { await invoke("sync_clear_config"); });
   }
 
@@ -164,6 +172,9 @@ export default function SyncPanel({
 
   return (
     <>
+    {/* Confirm dialogs */}
+    {dialog}
+
     {/* ── Download master-password modal ──────────────────────────────── */}
     {downloadModalOpen && (
       <div

@@ -12,12 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "Vault",
+        "title": "VaGuard",
         "width": 960,
         "height": 640,
         "minWidth": 900,
         "minHeight": 600,
-        "center": true
+        "center": true,
+        "decorations": false
       }
     ],
     "security": {

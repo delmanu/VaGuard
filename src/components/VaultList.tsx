@@ -3,10 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DownloadResult, Entry, NewEntry } from "../types";
 import EntryForm from "./EntryForm";
 import SyncPanel from "./SyncPanel";
+import ContextMenu, { type ContextMenuEntry as CtxItem } from "./ContextMenu";
+import { useConfirm } from "./ConfirmDialog";
 
 type ActiveView = "list" | "sync";
 
-export default function VaultList() {
+type CtxMenuState = { x: number; y: number; entry?: Entry } | null;
+
+export default function VaultList({ onLock }: { onLock: () => void }) {
   const [entries, setEntries]           = useState<Entry[]>([]);
   const [search, setSearch]             = useState("");
   const [editing, setEditing]           = useState<Entry | null>(null);
@@ -14,7 +18,10 @@ export default function VaultList() {
   const [activeView, setActiveView]     = useState<ActiveView>("list");
   const [showConflictsOnly, setShowConflictsOnly] = useState(false);
   const [error, setError]               = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu]           = useState<CtxMenuState>(null);
+  const [revealEntry, setRevealEntry]   = useState<Entry | null>(null);
   const searchRef                       = useRef<HTMLInputElement>(null);
+  const { confirm: showConfirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => { loadEntries(); }, []);
 
@@ -35,6 +42,83 @@ export default function VaultList() {
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function handleDelete(id: number) {
+    try {
+      await invoke("delete_entry", { id });
+      setEditing(null);
+      await loadEntries();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleLock() {
+    try {
+      await invoke("lock_vault");
+      onLock();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  /** Build context menu items depending on whether an entry was right-clicked */
+  function buildCtxItems(entry?: Entry): CtxItem[] {
+    const general: CtxItem[] = [
+      {
+        type: "action",
+        label: "New entry",
+        icon: <CtxPlusIcon />,
+        onClick: () => { setEditing(null); setCreating(true); setActiveView("list"); },
+      },
+      {
+        type: "action",
+        label: "Cloud sync",
+        icon: <SyncIcon />,
+        onClick: () => { setActiveView("sync"); setEditing(null); setCreating(false); },
+      },
+      {
+        type: "action",
+        label: "Lock vault",
+        icon: <CtxLockIcon />,
+        onClick: handleLock,
+      },
+    ];
+
+    if (!entry) return general;
+
+    return [
+      {
+        type: "action",
+        label: "Copy password",
+        icon: <CopyIcon />,
+        onClick: () => navigator.clipboard.writeText(entry.password),
+      },
+      {
+        type: "action",
+        label: "Show password",
+        icon: <CtxEyeIcon />,
+        onClick: () => setRevealEntry(entry),
+      },
+      {
+        type: "action",
+        label: "Delete entry",
+        icon: <CtxTrashIcon />,
+        variant: "danger",
+        onClick: async () => {
+          const ok = await showConfirm({
+            title: `Delete "${entry.title}"`,
+            message: "This action is permanent and cannot be undone.",
+            confirmLabel: "Delete",
+            variant: "danger",
+          });
+          if (ok) handleDelete(entry.id);
+        },
+      },
+      { type: "divider" },
+      ...general,
+    ];
   }
 
   async function handleSave(entry: NewEntry) {
@@ -62,10 +146,17 @@ export default function VaultList() {
   });
 
   return (
-    <div className="flex" style={{ height: "100%", overflow: "hidden" }}>
+    <div
+      className="flex"
+      style={{ height: "100%", overflow: "hidden" }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setCtxMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside
-        className="flex flex-col shrink-0"
+        className="flex flex-col shrink-0 rounded-lg m-[0.50rem] mr-[0.25rem]"
         style={{
           width: 260,
           borderRight: "1px solid var(--c-border)",
@@ -144,6 +235,9 @@ export default function VaultList() {
               entry={entry}
               active={editing?.id === entry.id}
               onSelect={() => { setEditing(entry); setActiveView("list"); }}
+              onContextMenu={(e, en) => {
+                setCtxMenu({ x: e.clientX, y: e.clientY, entry: en });
+              }}
             />
           ))}
 
@@ -182,7 +276,7 @@ export default function VaultList() {
       </aside>
 
       {/* ── Main area ───────────────────────────────────────────────────── */}
-      <div className="flex-1 relative overflow-hidden" style={{ background: "var(--c-bg)" }}>
+      <div className="flex-1 relative overflow-hidden m-[0.5rem] ml-[0.25rem] rounded-lg" style={{ background: "var(--c-bg)" }}>
         {error && (
           <div
             className="m-4 p-3 rounded-lg text-sm"
@@ -225,6 +319,7 @@ export default function VaultList() {
                 initial={editing ?? undefined}
                 onSave={handleSave}
                 onCancel={() => { setEditing(null); setCreating(false); }}
+                onDelete={editing ? () => handleDelete(editing.id) : undefined}
                 onConflictResolved={() => {
                   loadEntries();
                   setEditing(null);
@@ -244,8 +339,6 @@ export default function VaultList() {
               height: 48,
               background: "var(--c-accent)",
               color: "white",
-              fontSize: 24,
-              lineHeight: 1,
             }}
             title="New entry"
             onMouseEnter={(e) =>
@@ -255,10 +348,31 @@ export default function VaultList() {
               ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent)")
             }
           >
-            +
+            <FabPlusIcon />
           </button>
         )}
       </div>
+
+      {/* ── Custom context menu ──────────────────────────────────────────── */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={buildCtxItems(ctxMenu.entry)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+
+      {/* ── Reveal-password overlay ──────────────────────────────────────── */}
+      {revealEntry && (
+        <RevealPasswordOverlay
+          entry={revealEntry}
+          onClose={() => setRevealEntry(null)}
+        />
+      )}
+
+      {/* ── Confirm dialogs (context menu delete) ───────────────────────── */}
+      {confirmDialog}
     </div>
   );
 }
@@ -269,10 +383,12 @@ function SidebarItem({
   entry,
   active,
   onSelect,
+  onContextMenu,
 }: {
   entry: Entry;
   active: boolean;
   onSelect: () => void;
+  onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -286,6 +402,11 @@ function SidebarItem({
   return (
     <button
       onClick={onSelect}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation(); // prevent root div handler
+        onContextMenu(e, entry);
+      }}
       className="w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left group transition-colors duration-100"
       style={{
         background: active ? "var(--c-surface-3)" : "transparent",
@@ -392,6 +513,137 @@ function EmptyDetail({ hasEntries }: { hasEntries: boolean }) {
   );
 }
 
+/* ── Reveal password overlay ─────────────────────────────────────────────── */
+
+function RevealPasswordOverlay({
+  entry,
+  onClose,
+}: {
+  entry: Entry;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function copy() {
+    await navigator.clipboard.writeText(entry.password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div
+      style={{
+        position:        "fixed",
+        inset:           0,
+        zIndex:          150,
+        display:         "flex",
+        alignItems:      "center",
+        justifyContent:  "center",
+        background:      "rgba(0,0,0,0.45)",
+        backdropFilter:  "blur(2px)",
+        animation:       "fadeIn 0.12s ease",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background:   "var(--c-surface-1)",
+          border:       "1px solid var(--c-border)",
+          borderRadius: 14,
+          padding:      "20px 22px 18px",
+          width:        340,
+          maxWidth:     "calc(100vw - 48px)",
+          boxShadow:    "0 20px 60px rgba(0,0,0,0.4)",
+          animation:    "slideUp 0.14s ease",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--c-text-1)" }}>
+              {entry.title}
+            </p>
+            {entry.username && (
+              <p className="text-xs mt-0.5" style={{ color: "var(--c-text-3)" }}>
+                {entry.username}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{ color: "var(--c-text-3)", padding: 4 }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-1)")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-3)")
+            }
+          >
+            <RevealCloseIcon />
+          </button>
+        </div>
+
+        {/* Password display */}
+        <div
+          style={{
+            background:   "var(--c-surface-2)",
+            border:       "1px solid var(--c-border)",
+            borderRadius: 8,
+            padding:      "10px 12px",
+            fontFamily:   "monospace",
+            fontSize:     14,
+            color:        "var(--c-text-1)",
+            wordBreak:    "break-all",
+            lineHeight:   1.6,
+            userSelect:   "text",
+          }}
+        >
+          {entry.password}
+        </div>
+
+        {/* Copy button */}
+        <button
+          onClick={copy}
+          style={{
+            marginTop:    10,
+            width:        "100%",
+            padding:      "8px 0",
+            borderRadius: 8,
+            fontSize:     13,
+            fontWeight:   500,
+            background:   copied ? "rgba(74,222,128,0.12)" : "var(--c-surface-3)",
+            color:        copied ? "var(--c-success)" : "var(--c-text-2)",
+            border:       `1px solid ${copied ? "rgba(74,222,128,0.25)" : "var(--c-border)"}`,
+            cursor:       "pointer",
+            transition:   "all 0.15s",
+          }}
+        >
+          {copied ? "✓ Copied!" : "Copy to clipboard"}
+        </button>
+
+        <p
+          className="text-center mt-2 text-xs"
+          style={{ color: "var(--c-text-3)", opacity: 0.6 }}
+        >
+          Click outside or press Esc to close
+        </p>
+      </div>
+
+      <style>{`
+        @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes slideUp { from { transform: translateY(10px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+      `}</style>
+    </div>
+  );
+}
+
 /* ── Icons ───────────────────────────────────────────────────────────────── */
 
 function SearchIcon({ className }: { className?: string }) {
@@ -426,6 +678,67 @@ function SyncIcon() {
       <polyline points="1 4 1 10 7 10" />
       <polyline points="23 20 23 14 17 14" />
       <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+    </svg>
+  );
+}
+
+/* ── FAB icon ────────────────────────────────────────────────────────────── */
+
+function FabPlusIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.8" strokeLinecap="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5"  y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+/* ── Context-menu–specific icons (16px) ─────────────────────────────────── */
+
+function CtxPlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5"  y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function CtxLockIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function CtxEyeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function CtxTrashIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
+function RevealCloseIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="18" y1="6" x2="6"  y2="18" />
+      <line x1="6"  y1="6" x2="18" y2="18" />
     </svg>
   );
 }
