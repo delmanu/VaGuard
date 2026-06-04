@@ -78,10 +78,13 @@ export default function Titlebar({ unlocked, onLock }: Props) {
 
 function ShieldIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
+      <svg width="24" height="24" viewBox="0 0 17 22" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="var(--c-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8.5 20.534C8.5 20.534 16.5 16.534 16.5 10.534V3.534L8.5 0.534L0.5 3.534V10.534C0.5 16.534 8.5 20.534 8.5 20.534Z" />
+          <circle cx="6.5" cy="9.534" r="2" />
+          <line x1="8.5" y1="9.534" x2="13.5" y2="9.534" />
+          <line x1="13" y1="12.034" x2="13" y2="10.034" />
+          <line x1="11" y1="11.534" x2="11" y2="9.534" />
+      </svg>
   );
 }
 

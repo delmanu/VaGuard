@@ -2,11 +2,13 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Entry, NewEntry } from "../types";
 import PasswordGenerator from "./PasswordGenerator";
+import { useConfirm } from "./ConfirmDialog";
 
 interface Props {
   initial?: Entry;
   onSave: (entry: NewEntry) => void;
   onCancel: () => void;
+  onDelete?: () => void;
   onConflictResolved?: () => void;
 }
 
@@ -16,7 +18,8 @@ function isValidUrl(value: string) {
   catch { return false; }
 }
 
-export default function EntryForm({ initial, onSave, onCancel, onConflictResolved }: Props) {
+export default function EntryForm({ initial, onSave, onCancel, onDelete, onConflictResolved }: Props) {
+  const { confirm, dialog } = useConfirm();
   const [form, setForm] = useState<NewEntry>({
     title:    initial?.title    ?? "",
     username: initial?.username ?? "",
@@ -50,8 +53,17 @@ export default function EntryForm({ initial, onSave, onCancel, onConflictResolve
   };
   const isValid = !errors.title && !errors.url && !errors.password;
 
-  function handleCancel() {
-    if (dirty && !confirm("Discard unsaved changes?")) return;
+  async function handleCancel() {
+    if (dirty) {
+      const ok = await confirm({
+        title: "Discard changes",
+        message: "You have unsaved changes. Are you sure you want to discard them?",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        variant: "danger",
+      });
+      if (!ok) return;
+    }
     onCancel();
   }
 
@@ -209,11 +221,43 @@ export default function EntryForm({ initial, onSave, onCancel, onConflictResolve
         )}
       </form>
 
+      {/* Confirm dialogs */}
+      {dialog}
+
       {/* Footer */}
       <div
-        className="flex justify-end gap-2 px-5 py-3 shrink-0"
+        className="flex items-center gap-2 px-5 py-3 shrink-0"
         style={{ borderTop: "1px solid var(--c-border)" }}
       >
+        {/* Delete — only when editing an existing entry */}
+        {initial && onDelete && (
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Delete "${initial.title}"`,
+                message: "This action is permanent and cannot be undone.",
+                confirmLabel: "Delete",
+                variant: "danger",
+              });
+              if (ok) onDelete();
+            }}
+            className="p-2 rounded-lg transition-colors"
+            title="Delete entry"
+            style={{ color: "var(--c-danger)", background: "rgba(248,113,113,0.08)" }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.18)")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.08)")
+            }
+          >
+            <TrashIcon />
+          </button>
+        )}
+
+        <div className="flex-1" />
+
         <button
           type="button"
           onClick={handleCancel}
@@ -442,6 +486,16 @@ function inputStyle(hasError: boolean): React.CSSProperties {
 
 /* ── Icons ───────────────────────────────────────────────────────────────── */
 
+function TrashIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
 function CloseIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
