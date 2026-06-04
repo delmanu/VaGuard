@@ -29,7 +29,15 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
   });
   const [showPw,  setShowPw]  = useState(false);
   const [showGen, setShowGen] = useState(false);
+  const [pwCopied, setPwCopied] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<keyof NewEntry, boolean>>>({});
+
+  async function copyPassword() {
+    if (!form.password) return;
+    await navigator.clipboard.writeText(form.password);
+    setPwCopied(true);
+    setTimeout(() => setPwCopied(false), 2000);
+  }
 
   const dirty = JSON.stringify(form) !== JSON.stringify({
     title:    initial?.title    ?? "",
@@ -141,26 +149,59 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
         {/* Password */}
         <Field label="Password" required error={touched.password ? errors.password : null}>
           <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type={showPw ? "text" : "password"}
-                value={form.password}
-                onChange={(e) => set("password", e.target.value)}
-                onBlur={() => touch("password")}
-                placeholder="••••••••••••"
-                className="form-input w-full pr-9"
-                style={inputStyle(!!touched.password && !!errors.password)}
-              />
+            {/* Input + copy — visually joined */}
+            <div className="flex flex-1">
+              <div className="relative flex-1">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={form.password}
+                  onChange={(e) => set("password", e.target.value)}
+                  onBlur={() => touch("password")}
+                  placeholder="••••••••••••"
+                  className="form-input w-full pr-9"
+                  style={{
+                    ...inputStyle(!!touched.password && !!errors.password),
+                    borderTopRightRadius: 0,
+                    borderBottomRightRadius: 0,
+                    borderRight: "none",
+                  }}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                  style={{ color: "var(--c-text-3)" }}
+                >
+                  {showPw ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </div>
+
+              {/* Copy button */}
               <button
                 type="button"
                 tabIndex={-1}
-                onClick={() => setShowPw((v) => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2"
-                style={{ color: "var(--c-text-3)" }}
+                onClick={copyPassword}
+                title={pwCopied ? "Copied!" : "Copy password"}
+                style={{
+                  background:            "var(--c-surface-3)",
+                  color:                 pwCopied ? "var(--c-success)" : "var(--c-text-3)",
+                  border:                `1px solid ${touched.password && errors.password ? "var(--c-danger)" : "var(--c-border)"}`,
+                  borderLeft:            "none",
+                  borderTopRightRadius:  8,
+                  borderBottomRightRadius: 8,
+                  padding:               "0 10px",
+                  display:               "flex",
+                  alignItems:            "center",
+                  flexShrink:            0,
+                  cursor:                "pointer",
+                  transition:            "color 0.15s",
+                }}
               >
-                {showPw ? <EyeOffIcon /> : <EyeIcon />}
+                {pwCopied ? <CheckMiniIcon /> : <CopyMiniIcon />}
               </button>
             </div>
+
             <button
               type="button"
               onClick={() => setShowGen((v) => !v)}
@@ -270,13 +311,14 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
           type="submit"
           form="entry-form"
           disabled={!isValid}
-          className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
           style={{
             background: isValid ? "var(--c-accent)" : "var(--c-surface-3)",
             color: isValid ? "white" : "var(--c-text-3)",
             cursor: isValid ? "pointer" : "default",
           }}
         >
+          <SaveIcon />
           Save
         </button>
       </div>
@@ -486,6 +528,33 @@ function inputStyle(hasError: boolean): React.CSSProperties {
 
 /* ── Icons ───────────────────────────────────────────────────────────────── */
 
+function SaveIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
+    </svg>
+  );
+}
+function CopyMiniIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function CheckMiniIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
 function TrashIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

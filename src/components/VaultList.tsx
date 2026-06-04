@@ -339,8 +339,6 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
               height: 48,
               background: "var(--c-accent)",
               color: "white",
-              fontSize: 24,
-              lineHeight: 1,
             }}
             title="New entry"
             onMouseEnter={(e) =>
@@ -350,7 +348,7 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
               ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent)")
             }
           >
-            +
+            <FabPlusIcon />
           </button>
         )}
       </div>
@@ -680,6 +678,18 @@ function SyncIcon() {
       <polyline points="1 4 1 10 7 10" />
       <polyline points="23 20 23 14 17 14" />
       <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+    </svg>
+  );
+}
+
+/* ── FAB icon ────────────────────────────────────────────────────────────── */
+
+function FabPlusIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.8" strokeLinecap="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5"  y1="12" x2="19" y2="12" />
     </svg>
   );
 }
