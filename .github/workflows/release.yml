@@ -1,6 +1,7 @@
 name: Release
 
 # Triggered by version tags: v1.0.0, v0.2.3-beta, etc.
+# To release: git tag v0.1.0 && git push origin v0.1.0
 on:
   push:
     tags:
@@ -28,22 +29,24 @@ jobs:
       # ── 3. Rust stable ──────────────────────────────────────────────────────
       - name: Set up Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
       # Cache Cargo registry + compiled deps to speed up subsequent runs
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
+            ~\.cargo\registry
+            ~\.cargo\git
+            src-tauri\target
           key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       # ── 4. Install npm dependencies ─────────────────────────────────────────
       - name: Install npm dependencies
-        run: npm install
+        run: npm ci
 
       # ── 5. Build Tauri app ──────────────────────────────────────────────────
       - name: Build Tauri app
@@ -52,7 +55,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ── 6. Collect installer artifacts ─────────────────────────────────────
-      # Tauri emits installers to src-tauri/target/release/bundle/
+      # Tauri v2 emits installers to src-tauri/target/release/bundle/
       - name: Find installer files
         id: find_artifacts
         shell: pwsh
@@ -62,18 +65,18 @@ jobs:
           $files = @()
           if ($msi)  { $files += $msi.FullName  }
           if ($exe)  { $files += $exe.FullName  }
-          # Write as multiline output
           $joined = $files -join "`n"
-          "files<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          $joined      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "EOF"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Artifacts: $joined"
+          "files<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $joined      | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "EOF"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Artifacts found: $($files.Count)"
+          foreach ($f in $files) { Write-Host "  $f" }
 
       # ── 7. Publish GitHub Release ───────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Vault ${{ github.ref_name }}"
+          name: "VaGuard ${{ github.ref_name }}"
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
