@@ -35,6 +35,10 @@ pub fn run() {
             commands::sync_get_status,
             commands::sync_clear_config,
             commands::resolve_conflict,
+            // Settings
+            commands::change_master_password,
+            commands::export_vault,
+            commands::import_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,9 +5,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 interface Props {
   unlocked: boolean;
   onLock: () => void;
+  onSettings: () => void;
 }
 
-export default function Titlebar({ unlocked, onLock }: Props) {
+export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -95,6 +96,24 @@ export default function Titlebar({ unlocked, onLock }: Props) {
               Lock
             </button>
           )}
+
+          {/* Settings button */}
+          <button
+            onClick={onSettings}
+            title="Settings"
+            className="flex items-center justify-center p-1.5 rounded-md transition-colors duration-150"
+            style={{ color: "var(--c-text-3)", marginLeft: 2 }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-1)";
+              (e.currentTarget as HTMLButtonElement).style.background = "var(--c-surface-3)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-3)";
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            <TitlebarGearIcon />
+          </button>
         </div>
 
         {/* Separator */}
@@ -238,6 +257,15 @@ function ShieldIcon() {
       <line x1="8.5"  y1="9.534"  x2="13.5" y2="9.534" />
       <line x1="13"   y1="12.034" x2="13"   y2="10.034" />
       <line x1="11"   y1="11.534" x2="11"   y2="9.534" />
+    </svg>
+  );
+}
+
+function TitlebarGearIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

@@ -23,7 +23,7 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     --c-bg:        #f1f5f9;
     --c-surface-1: #ffffff;
     --c-surface-2: #f8fafc;
@@ -38,6 +38,39 @@
     --c-success:   #16a34a;
     --c-warn:      #d97706;
   }
+}
+
+/* Explicit theme overrides — higher specificity than media query */
+:root[data-theme="light"] {
+  --c-bg:        #f1f5f9;
+  --c-surface-1: #ffffff;
+  --c-surface-2: #f8fafc;
+  --c-surface-3: #e2e8f0;
+  --c-border:    rgba(0, 0, 0, 0.08);
+  --c-accent:    #6366f1;
+  --c-accent-h:  #4f46e5;
+  --c-text-1:    #0f172a;
+  --c-text-2:    #475569;
+  --c-text-3:    #94a3b8;
+  --c-danger:    #dc2626;
+  --c-success:   #16a34a;
+  --c-warn:      #d97706;
+}
+
+:root[data-theme="dark"] {
+  --c-bg:        #0d0f17;
+  --c-surface-1: #161926;
+  --c-surface-2: #1e2235;
+  --c-surface-3: #272c42;
+  --c-border:    rgba(255, 255, 255, 0.07);
+  --c-accent:    #6366f1;
+  --c-accent-h:  #818cf8;
+  --c-text-1:    #eef2ff;
+  --c-text-2:    #94a3b8;
+  --c-text-3:    #4b5563;
+  --c-danger:    #f87171;
+  --c-success:   #4ade80;
+  --c-warn:      #fbbf24;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────────── */

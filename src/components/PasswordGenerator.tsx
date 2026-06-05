@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { loadGenDefaults } from "./SettingsPanel";
 
 interface Props {
   onUse?: (password: string) => void;
@@ -20,10 +21,11 @@ function entropyMeta(bits: number): { label: string; color: string; pct: number 
 }
 
 export default function PasswordGenerator({ onUse }: Props) {
-  const [length,  setLength]  = useState(20);
-  const [upper,   setUpper]   = useState(true);
-  const [numbers, setNumbers] = useState(true);
-  const [symbols, setSymbols] = useState(true);
+  const defaults = loadGenDefaults();
+  const [length,  setLength]  = useState(defaults.length);
+  const [upper,   setUpper]   = useState(defaults.upper);
+  const [numbers, setNumbers] = useState(defaults.numbers);
+  const [symbols, setSymbols] = useState(defaults.symbols);
   const [password, setPassword] = useState("");
   const [copied,   setCopied]   = useState(false);
 
