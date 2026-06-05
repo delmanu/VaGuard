@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import type { DownloadResult, Entry, NewEntry } from "../types";
 import EntryForm from "./EntryForm";
 import SyncPanel from "./SyncPanel";
@@ -11,6 +12,7 @@ type ActiveView = "list" | "sync";
 type CtxMenuState = { x: number; y: number; entry?: Entry } | null;
 
 export default function VaultList({ onLock }: { onLock: () => void }) {
+  const { t } = useTranslation();
   const [entries, setEntries]           = useState<Entry[]>([]);
   const [search, setSearch]             = useState("");
   const [editing, setEditing]           = useState<Entry | null>(null);
@@ -68,19 +70,19 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
     const general: CtxItem[] = [
       {
         type: "action",
-        label: "New entry",
+        label: t("context.new_entry"),
         icon: <CtxPlusIcon />,
         onClick: () => { setEditing(null); setCreating(true); setActiveView("list"); },
       },
       {
         type: "action",
-        label: "Cloud sync",
+        label: t("context.cloud_sync"),
         icon: <SyncIcon />,
         onClick: () => { setActiveView("sync"); setEditing(null); setCreating(false); },
       },
       {
         type: "action",
-        label: "Lock vault",
+        label: t("context.lock_vault"),
         icon: <CtxLockIcon />,
         onClick: handleLock,
       },
@@ -91,26 +93,26 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
     return [
       {
         type: "action",
-        label: "Copy password",
+        label: t("context.copy_password"),
         icon: <CopyIcon />,
         onClick: () => navigator.clipboard.writeText(entry.password),
       },
       {
         type: "action",
-        label: "Show password",
+        label: t("context.show_password"),
         icon: <CtxEyeIcon />,
         onClick: () => setRevealEntry(entry),
       },
       {
         type: "action",
-        label: "Delete entry",
+        label: t("context.delete_entry"),
         icon: <CtxTrashIcon />,
         variant: "danger",
         onClick: async () => {
           const ok = await showConfirm({
-            title: `Delete "${entry.title}"`,
-            message: "This action is permanent and cannot be undone.",
-            confirmLabel: "Delete",
+            title: t("entry.delete.dialog_title", { title: entry.title }),
+            message: t("entry.delete.message"),
+            confirmLabel: t("entry.delete"),
             variant: "danger",
           });
           if (ok) handleDelete(entry.id);
@@ -170,7 +172,7 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
             <input
               ref={searchRef}
               type="search"
-              placeholder="Search"
+              placeholder={t("vault.search")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 rounded-lg text-sm outline-none"
@@ -199,13 +201,13 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
             }}
           >
             <span className="text-xs" style={{ color: "var(--c-danger)" }}>
-              Showing conflicts only
+              {t("vault.showing_conflicts")}
             </span>
             <button
               onClick={() => setShowConflictsOnly(false)}
               className="text-xs ml-1"
               style={{ color: "var(--c-danger)", opacity: 0.7 }}
-              title="Clear filter"
+              title={t("vault.filter_conflicts")}
             >
               ✕
             </button>
@@ -214,15 +216,15 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
 
         {/* Count */}
         <div className="px-3 pb-2 text-xs" style={{ color: "var(--c-text-3)" }}>
-          {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
+          {t("vault.entry_count", { count: filtered.length })}
           {conflictCount > 0 && !showConflictsOnly && (
             <button
               onClick={() => setShowConflictsOnly(true)}
               className="ml-2"
               style={{ color: "var(--c-danger)", textDecoration: "underline" }}
-              title="Filter to conflict entries"
+              title={t("vault.filter_conflicts")}
             >
-              {conflictCount} conflict{conflictCount !== 1 ? "s" : ""}
+              {t("vault.conflict_count", { count: conflictCount })}
             </button>
           )}
         </div>
@@ -246,10 +248,10 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
               <span style={{ fontSize: 32 }}>🔍</span>
               <p className="text-xs mt-2" style={{ color: "var(--c-text-3)" }}>
                 {search
-                  ? "No entries match your search"
+                  ? t("vault.empty.search")
                   : showConflictsOnly
-                  ? "No conflict entries"
-                  : "No entries yet"}
+                  ? t("vault.empty.conflicts")
+                  : t("vault.empty.default")}
               </p>
             </div>
           )}
@@ -270,7 +272,7 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
             }}
           >
             <SyncIcon />
-            Cloud sync
+            {t("vault.cloud_sync")}
           </button>
         </div>
       </aside>
@@ -340,7 +342,7 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
               background: "var(--c-accent)",
               color: "white",
             }}
-            title="New entry"
+            title={t("vault.new_entry")}
             onMouseEnter={(e) =>
               ((e.currentTarget as HTMLButtonElement).style.background = "var(--c-accent-h)")
             }
@@ -390,6 +392,7 @@ function SidebarItem({
   onSelect: () => void;
   onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function copyPassword(e: React.MouseEvent) {
@@ -404,7 +407,7 @@ function SidebarItem({
       onClick={onSelect}
       onContextMenu={(e) => {
         e.preventDefault();
-        e.stopPropagation(); // prevent root div handler
+        e.stopPropagation();
         onContextMenu(e, entry);
       }}
       className="w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left group transition-colors duration-100"
@@ -426,7 +429,7 @@ function SidebarItem({
         <Avatar title={entry.title} />
         {entry.conflict && (
           <span
-            title="Esta entrada tiene un conflicto con la versión en la nube"
+            title={t("vault.conflict_tooltip")}
             style={{
               position: "absolute",
               top: -2,
@@ -461,7 +464,7 @@ function SidebarItem({
           color: copied ? "var(--c-success)" : "var(--c-text-3)",
           background: "var(--c-surface-3)",
         }}
-        title={copied ? "Copied!" : "Copy password"}
+        title={copied ? t("vault.copied") : t("vault.copy_password")}
       >
         {copied ? <CheckIcon /> : <CopyIcon />}
       </span>
@@ -495,6 +498,7 @@ function Avatar({ title }: { title: string }) {
 /* ── Empty detail state ──────────────────────────────────────────────────── */
 
 function EmptyDetail({ hasEntries }: { hasEntries: boolean }) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex flex-col items-center justify-center h-full gap-3 fade-in"
@@ -507,7 +511,7 @@ function EmptyDetail({ hasEntries }: { hasEntries: boolean }) {
         <circle cx="12" cy="12" r="1" fill="currentColor" />
       </svg>
       <p className="text-sm" style={{ opacity: 0.6 }}>
-        {hasEntries ? "Select an entry to edit" : "Add your first entry with +"}
+        {hasEntries ? t("vault.select_hint") : t("vault.add_hint")}
       </p>
     </div>
   );
@@ -522,6 +526,7 @@ function RevealPasswordOverlay({
   entry: Entry;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -625,14 +630,14 @@ function RevealPasswordOverlay({
             transition:   "all 0.15s",
           }}
         >
-          {copied ? "✓ Copied!" : "Copy to clipboard"}
+          {copied ? `✓ ${t("vault.copied")}` : t("vault.copy_clipboard")}
         </button>
 
         <p
           className="text-center mt-2 text-xs"
           style={{ color: "var(--c-text-3)", opacity: 0.6 }}
         >
-          Click outside or press Esc to close
+          {t("vault.close_hint")}
         </p>
       </div>
 

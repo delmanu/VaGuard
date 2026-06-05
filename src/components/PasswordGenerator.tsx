@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { loadGenDefaults } from "./SettingsPanel";
 
 interface Props {
@@ -14,13 +15,26 @@ function calcEntropy(length: number, upper: boolean, numbers: boolean, symbols: 
   return Math.floor(length * Math.log2(pool));
 }
 
-function entropyMeta(bits: number): { label: string; color: string; pct: number } {
-  if (bits < 40)  return { label: `${bits} bits — Weak`,   color: "var(--c-danger)", pct: Math.max(5, (bits / 128) * 100) };
-  if (bits < 70)  return { label: `${bits} bits — Fair`,   color: "var(--c-warn)",   pct: (bits / 128) * 100 };
-  return              { label: `${bits} bits — Strong`, color: "var(--c-success)", pct: Math.min(100, (bits / 128) * 100) };
+function entropyKey(bits: number): "generator.weak" | "generator.fair" | "generator.strong" {
+  if (bits < 40) return "generator.weak";
+  if (bits < 70) return "generator.fair";
+  return "generator.strong";
+}
+
+function entropyColor(bits: number): string {
+  if (bits < 40) return "var(--c-danger)";
+  if (bits < 70) return "var(--c-warn)";
+  return "var(--c-success)";
+}
+
+function entropyPct(bits: number): number {
+  if (bits < 40) return Math.max(5, (bits / 128) * 100);
+  if (bits < 70) return (bits / 128) * 100;
+  return Math.min(100, (bits / 128) * 100);
 }
 
 export default function PasswordGenerator({ onUse }: Props) {
+  const { t } = useTranslation();
   const defaults = loadGenDefaults();
   const [length,  setLength]  = useState(defaults.length);
   const [upper,   setUpper]   = useState(defaults.upper);
@@ -30,7 +44,14 @@ export default function PasswordGenerator({ onUse }: Props) {
   const [copied,   setCopied]   = useState(false);
 
   const entropy = calcEntropy(length, upper, numbers, symbols);
-  const meta    = entropyMeta(entropy);
+  const color   = entropyColor(entropy);
+  const pct     = entropyPct(entropy);
+
+  const options: [string, boolean, (v: boolean) => void][] = [
+    [t("generator.uppercase"), upper,   setUpper],
+    [t("generator.numbers"),   numbers, setNumbers],
+    [t("generator.symbols"),   symbols, setSymbols],
+  ];
 
   // Auto-generate when options change (after first mount)
   useEffect(() => {
@@ -40,8 +61,6 @@ export default function PasswordGenerator({ onUse }: Props) {
   async function generate() {
     try {
       const pw = await invoke<string>("generate_password", { length, symbols, numbers });
-      // If uppercase not wanted, the Rust side already excludes it;
-      // uppercase is part of the base charset (a-z + A-Z) — filter here if needed.
       setPassword(upper ? pw : pw.toLowerCase());
       setCopied(false);
     } catch (e) {
@@ -62,13 +81,13 @@ export default function PasswordGenerator({ onUse }: Props) {
       style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
     >
       <p className="text-xs font-semibold" style={{ color: "var(--c-text-2)" }}>
-        Password generator
+        {t("generator.title")}
       </p>
 
       {/* Length slider */}
       <div className="space-y-1">
         <div className="flex justify-between text-xs" style={{ color: "var(--c-text-2)" }}>
-          <span>Length</span>
+          <span>{t("generator.length")}</span>
           <span className="font-mono font-semibold" style={{ color: "var(--c-text-1)" }}>
             {length}
           </span>
@@ -89,13 +108,7 @@ export default function PasswordGenerator({ onUse }: Props) {
 
       {/* Options */}
       <div className="flex flex-wrap gap-x-4 gap-y-2">
-        {(
-          [
-            ["Uppercase", upper,   setUpper],
-            ["Numbers",  numbers, setNumbers],
-            ["Symbols",  symbols, setSymbols],
-          ] as [string, boolean, (v: boolean) => void][]
-        ).map(([label, val, setter]) => (
+        {options.map(([label, val, setter]) => (
           <label key={label} className="flex items-center gap-1.5 cursor-pointer select-none text-xs" style={{ color: "var(--c-text-2)" }}>
             <input
               type="checkbox"
@@ -113,10 +126,12 @@ export default function PasswordGenerator({ onUse }: Props) {
         <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--c-surface-3)" }}>
           <div
             className="h-full rounded-full transition-all duration-300"
-            style={{ width: `${meta.pct}%`, background: meta.color }}
+            style={{ width: `${pct}%`, background: color }}
           />
         </div>
-        <p className="text-xs" style={{ color: meta.color }}>{meta.label}</p>
+        <p className="text-xs" style={{ color }}>
+          {t(entropyKey(entropy), { bits: entropy })}
+        </p>
       </div>
 
       {/* Output */}
@@ -124,7 +139,7 @@ export default function PasswordGenerator({ onUse }: Props) {
         <input
           readOnly
           value={password}
-          placeholder="Click generate…"
+          placeholder={t("generator.placeholder")}
           className="flex-1 font-mono text-xs rounded-lg px-3 py-2 outline-none min-w-0"
           style={{
             background: "var(--c-surface-3)",
@@ -141,7 +156,7 @@ export default function PasswordGenerator({ onUse }: Props) {
             color: copied ? "var(--c-success)" : "var(--c-text-2)",
           }}
         >
-          {copied ? "✓ Copied" : "Copy"}
+          {copied ? t("generator.copied") : t("generator.copy")}
         </button>
       </div>
 
@@ -152,7 +167,7 @@ export default function PasswordGenerator({ onUse }: Props) {
           className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors"
           style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
         >
-          ↻ Regenerate
+          {t("generator.regenerate")}
         </button>
         {onUse && (
           <button
@@ -164,7 +179,7 @@ export default function PasswordGenerator({ onUse }: Props) {
               color: password ? "white" : "var(--c-text-3)",
             }}
           >
-            Use this
+            {t("generator.use")}
           </button>
         )}
       </div>

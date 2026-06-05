@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   unlocked: boolean;
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
+  const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -76,7 +78,7 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
               className="w-1.5 h-1.5 rounded-full"
               style={{ background: unlocked ? "var(--c-success)" : "var(--c-danger)" }}
             />
-            {unlocked ? "Unlocked" : "Locked"}
+            {unlocked ? t("titlebar.unlocked") : t("titlebar.locked")}
           </div>
 
           {/* Lock button — only when unlocked */}
@@ -93,14 +95,14 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
               }
             >
               <LockIcon />
-              Lock
+              {t("titlebar.lock")}
             </button>
           )}
 
           {/* Settings button */}
           <button
             onClick={onSettings}
-            title="Settings"
+            title={t("titlebar.settings")}
             className="flex items-center justify-center p-1.5 rounded-md transition-colors duration-150"
             style={{ color: "var(--c-text-3)", marginLeft: 2 }}
             onMouseEnter={(e) => {
@@ -131,19 +133,19 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
         {/* Window controls */}
         <div className="flex h-full">
           <WinBtn
-            title="Minimize"
+            title={t("titlebar.minimize")}
             onClick={() => getCurrentWindow().minimize()}
           >
             <MinimizeIcon />
           </WinBtn>
           <WinBtn
-            title={isMaximized ? "Restore" : "Maximize"}
+            title={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
             onClick={() => getCurrentWindow().toggleMaximize()}
           >
             {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
           </WinBtn>
           <WinBtn
-            title="Close"
+            title={t("titlebar.close")}
             onClick={() => getCurrentWindow().close()}
             danger
           >

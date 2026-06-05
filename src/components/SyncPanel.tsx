@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import type { DownloadResult, SyncStatus } from "../types";
 import { useConfirm } from "./ConfirmDialog";
 
@@ -13,6 +14,7 @@ export default function SyncPanel({
   onDownloadComplete: (result: DownloadResult) => void;
   onShowConflicts: () => void;
 }) {
+  const { t } = useTranslation();
   const { confirm, dialog } = useConfirm();
   const [status, setStatus]       = useState<SyncStatus | null>(null);
   const [loading, setLoading]     = useState(true);
@@ -45,8 +47,8 @@ export default function SyncPanel({
   // Countdown tick
   useEffect(() => {
     if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
+    const t2 = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t2);
   }, [cooldown]);
 
   async function loadStatus() {
@@ -60,7 +62,7 @@ export default function SyncPanel({
     }
   }
 
-  async function run(label: string, fn: () => Promise<void>) {
+  async function run(label: string, fn: () => Promise<void>, successMsg?: string) {
     setError(null);
     setSuccess(null);
     setDownloadResult(null);
@@ -68,7 +70,7 @@ export default function SyncPanel({
     try {
       await fn();
       await loadStatus();
-      setSuccess(`${label} completed.`);
+      if (successMsg) setSuccess(successMsg);
     } catch (e) {
       setError(friendlyError(String(e)));
     } finally {
@@ -89,19 +91,21 @@ export default function SyncPanel({
         anonKey: formKey.trim(),
         email: formEmail.trim(),
         supabasePassword: formPw,
-      })
+      }),
+      t("sync.connected_success")
     );
   }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     await run("Signing in", () =>
-      invoke("sync_login", { supabasePassword: loginPw })
+      invoke("sync_login", { supabasePassword: loginPw }),
+      t("sync.signed_in_success")
     );
   }
 
   async function handleUpload() {
-    await run("Uploading", () => invoke("sync_upload"));
+    await run("Uploading", () => invoke("sync_upload"), t("sync.uploaded_success"));
   }
 
   function handleDownload() {
@@ -123,9 +127,9 @@ export default function SyncPanel({
       });
       await loadStatus();
 
-      const addedLabel = `${result.added} ${result.added === 1 ? "entry" : "entries"} added`;
-      const conflictLabel = result.conflicts > 0
-        ? `, ${result.conflicts} conflict${result.conflicts !== 1 ? "s" : ""} detected`
+      const addedLabel     = t("sync.added", { count: result.added });
+      const conflictLabel  = result.conflicts > 0
+        ? t("sync.conflicts_detected", { count: result.conflicts })
         : "";
       setSuccess(`✓ ${addedLabel}${conflictLabel}`);
       setDownloadResult(result);
@@ -139,17 +143,17 @@ export default function SyncPanel({
 
   async function handleDisconnect() {
     const ok = await confirm({
-      title: "Unlink account",
-      message: "This will remove your Supabase configuration and sign you out. You can reconnect at any time.",
-      confirmLabel: "Unlink",
+      title: t("sync.unlink.title"),
+      message: t("sync.unlink.message"),
+      confirmLabel: t("sync.unlink.confirm"),
       variant: "danger",
     });
     if (!ok) return;
-    await run("Disconnecting", async () => { await invoke("sync_clear_config"); });
+    await run("Disconnecting", async () => { await invoke("sync_clear_config"); }, t("sync.disconnected_success"));
   }
 
   async function handleLogout() {
-    await run("Signing out", () => invoke("sync_logout"));
+    await run("Signing out", () => invoke("sync_logout"), t("sync.signed_out_success"));
   }
 
   function handleShowConflicts() {
@@ -158,9 +162,9 @@ export default function SyncPanel({
     onShowConflicts();
   }
 
-  const syncDisabled = cooldown > 0 || !!busy;
-  const uploadLabel  = cooldown > 0 ? `Sync now (${cooldown}s)` : "Sync now (upload)";
-  const downloadLabel = cooldown > 0 ? `Download (${cooldown}s)` : "Download from cloud";
+  const syncDisabled  = cooldown > 0 || !!busy;
+  const uploadLabel   = cooldown > 0 ? t("sync.upload_label_busy", { count: cooldown }) : t("sync.upload_label");
+  const downloadLabel = cooldown > 0 ? t("sync.download_label_busy", { count: cooldown }) : t("sync.download_label");
 
   if (loading) {
     return (
@@ -201,19 +205,16 @@ export default function SyncPanel({
         >
           <div>
             <p className="text-sm font-semibold mb-1" style={{ color: "var(--c-text-1)" }}>
-              Download from cloud
+              {t("sync.download_modal.title")}
             </p>
             <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-              New cloud entries will be added to your local vault. Conflicting
-              entries will be flagged for review — nothing is deleted automatically.
-              Enter your <strong>master password</strong> so VaGuard can decrypt
-              the cloud vault.
+              {t("sync.download_modal.description")}
             </p>
           </div>
 
           <div className="space-y-1">
             <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-              Master password <span style={{ color: "var(--c-danger)" }}>*</span>
+              {t("sync.download_modal.master_password")} <span style={{ color: "var(--c-danger)" }}>*</span>
             </label>
             <div className="relative">
               <input
@@ -222,7 +223,7 @@ export default function SyncPanel({
                 value={downloadMasterPw}
                 onChange={(e) => setDownloadMasterPw(e.target.value)}
                 required
-                placeholder="Enter master password"
+                placeholder={t("sync.download_modal.placeholder")}
                 className="w-full pr-10 pl-3 py-2 rounded-lg text-xs outline-none"
                 style={{
                   background: "var(--c-surface-2)",
@@ -249,14 +250,14 @@ export default function SyncPanel({
               className="flex-1 py-2 rounded-lg text-xs"
               style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
             >
-              Cancel
+              {t("sync.download_modal.cancel")}
             </button>
             <button
               type="submit"
               className="flex-1 py-2 rounded-lg text-xs font-semibold"
               style={{ background: "var(--c-accent)", color: "white" }}
             >
-              Merge &amp; download
+              {t("sync.download_modal.confirm")}
             </button>
           </div>
         </form>
@@ -271,11 +272,10 @@ export default function SyncPanel({
         className="text-base font-semibold mb-1"
         style={{ color: "var(--c-text-1)" }}
       >
-        Cloud sync
+        {t("sync.title")}
       </h2>
       <p className="text-xs mb-6" style={{ color: "var(--c-text-2)" }}>
-        Zero-knowledge — your data is encrypted before it leaves your device.
-        This app has no servers of its own.
+        {t("sync.subtitle")}
       </p>
 
       {/* Error / success banners */}
@@ -311,7 +311,7 @@ export default function SyncPanel({
               className="shrink-0 text-xs underline"
               style={{ color: "var(--c-accent)" }}
             >
-              View conflicts →
+              {t("sync.view_conflicts")}
             </button>
           )}
         </div>
@@ -323,21 +323,21 @@ export default function SyncPanel({
           <Steps />
           <form onSubmit={handleConfigure} className="mt-6 space-y-3">
             <SyncField
-              label="Supabase Project URL"
+              label={t("sync.field.url")}
               placeholder="https://xxxx.supabase.co"
               value={formUrl}
               onChange={setFormUrl}
               required
             />
             <SyncField
-              label="Supabase Anon Key"
+              label={t("sync.field.key")}
               placeholder="eyJhbGci…"
               value={formKey}
               onChange={setFormKey}
               required
             />
             <SyncField
-              label="Your email"
+              label={t("sync.field.email")}
               placeholder="you@example.com"
               value={formEmail}
               onChange={setFormEmail}
@@ -346,10 +346,10 @@ export default function SyncPanel({
             />
             <div className="space-y-1">
               <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                Supabase password <span style={{ color: "var(--c-danger)" }}>*</span>
+                {t("sync.field.password")} <span style={{ color: "var(--c-danger)" }}>*</span>
               </label>
               <p className="text-xs" style={{ color: "var(--c-text-3)" }}>
-                This is separate from your master password and stored in your Supabase project.
+                {t("sync.field.password_hint")}
               </p>
               <div className="relative">
                 <input
@@ -385,7 +385,7 @@ export default function SyncPanel({
                 cursor: busy ? "default" : "pointer",
               }}
             >
-              {busy === "Connecting" ? <InlineSpinner label="Connecting…" /> : "Connect and verify"}
+              {busy === "Connecting" ? <InlineSpinner label={t("sync.connecting_busy")} /> : t("sync.connect_verify")}
             </button>
           </form>
         </>
@@ -396,12 +396,12 @@ export default function SyncPanel({
         <div className="space-y-4">
           <ConfigBadge status={status} />
           <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-            Session expired. Enter your Supabase password to continue syncing.
+            {t("sync.session_expired_message")}
           </p>
           <form onSubmit={handleLogin} className="space-y-3">
             <div className="space-y-1">
               <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                Supabase password
+                {t("sync.login_password")}
               </label>
               <div className="relative">
                 <input
@@ -435,7 +435,7 @@ export default function SyncPanel({
                 className="flex-1 py-2 rounded-lg text-xs font-semibold"
                 style={{ background: "var(--c-accent)", color: "white" }}
               >
-                {busy === "Signing in" ? <InlineSpinner label="Signing in…" /> : "Sign in"}
+                {busy === "Signing in" ? <InlineSpinner label={t("sync.signing_in_busy")} /> : t("sync.sign_in")}
               </button>
               <button
                 type="button"
@@ -443,7 +443,7 @@ export default function SyncPanel({
                 className="px-3 py-2 rounded-lg text-xs"
                 style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
               >
-                Disconnect
+                {t("sync.disconnect")}
               </button>
             </div>
           </form>
@@ -462,17 +462,17 @@ export default function SyncPanel({
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                Last synced
+                {t("sync.last_synced")}
               </span>
               <span className="text-xs font-mono" style={{ color: "var(--c-text-1)" }}>
                 {status.last_sync_timestamp > 0
                   ? new Date(status.last_sync_timestamp * 1000).toLocaleString()
-                  : "Never"}
+                  : t("sync.never")}
               </span>
             </div>
             {cooldown > 0 && (
               <p className="text-xs" style={{ color: "var(--c-text-3)" }}>
-                Buttons available in {cooldown}s…
+                {t("sync.cooldown", { count: cooldown })}
               </p>
             )}
           </div>
@@ -481,21 +481,21 @@ export default function SyncPanel({
           <div className="space-y-2">
             <SyncActionButton
               label={uploadLabel}
-              description="Encrypt and upload your local vault to the cloud"
+              description={t("sync.upload_description")}
               icon="↑"
               color="var(--c-accent)"
               busy={busy === "Uploading"}
-              busyLabel="Uploading…"
+              busyLabel={t("sync.uploading")}
               onClick={handleUpload}
               disabled={syncDisabled}
             />
             <SyncActionButton
               label={downloadLabel}
-              description="Merge cloud entries into your local vault"
+              description={t("sync.download_description")}
               icon="↓"
               color="var(--c-warn)"
               busy={busy === "Downloading"}
-              busyLabel="Downloading…"
+              busyLabel={t("sync.downloading")}
               onClick={handleDownload}
               disabled={syncDisabled}
               warn
@@ -511,7 +511,7 @@ export default function SyncPanel({
             }}
           >
             <p className="text-xs font-semibold" style={{ color: "var(--c-danger)" }}>
-              Danger zone
+              {t("sync.danger_zone")}
             </p>
             <div className="flex gap-2">
               <button
@@ -520,7 +520,7 @@ export default function SyncPanel({
                 className="flex-1 py-2 rounded-lg text-xs"
                 style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
               >
-                Sign out
+                {t("sync.sign_out")}
               </button>
               <button
                 onClick={handleDisconnect}
@@ -529,8 +529,8 @@ export default function SyncPanel({
                 style={{ background: "rgba(248,113,113,0.15)", color: "var(--c-danger)" }}
               >
                 {busy === "Disconnecting"
-                  ? <InlineSpinner label="Removing…" />
-                  : "Unlink account"}
+                  ? <InlineSpinner label={t("sync.removing")} />
+                  : t("sync.unlink")}
               </button>
             </div>
           </div>
@@ -544,26 +544,27 @@ export default function SyncPanel({
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function Steps() {
+  const { t } = useTranslation();
   return (
     <ol className="space-y-3">
       {[
         {
           n: 1,
-          text: "Create a free project at ",
+          text: t("sync.steps.1"),
           link: "https://supabase.com",
           linkLabel: "supabase.com",
         },
         {
           n: 2,
-          text: "Copy your Project URL and anon key from ",
+          text: t("sync.steps.2"),
           link: "https://supabase.com/dashboard/project/_/settings/api",
-          linkLabel: "Settings → API",
+          linkLabel: t("sync.steps.2_link"),
         },
         {
           n: 3,
-          text: "Create a private Storage bucket named ",
+          text: t("sync.steps.3"),
           code: "vaults",
-          extra: " with RLS enabled.",
+          extra: t("sync.steps.3_extra"),
         },
       ].map(({ n, text, link, linkLabel, code, extra }) => (
         <li key={n} className="flex gap-3 items-start">
@@ -608,6 +609,7 @@ function Steps() {
 }
 
 function ConfigBadge({ status }: { status: SyncStatus }) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex items-center gap-3 p-3 rounded-xl"
@@ -631,7 +633,7 @@ function ConfigBadge({ status }: { status: SyncStatus }) {
         className="text-xs ml-auto shrink-0"
         style={{ color: status.is_authenticated ? "var(--c-success)" : "var(--c-warn)" }}
       >
-        {status.is_authenticated ? "Connected" : "Session expired"}
+        {status.is_authenticated ? t("sync.connected") : t("sync.session_expired")}
       </span>
     </div>
   );
@@ -757,6 +759,7 @@ function InlineSpinner({ label }: { label: string }) {
 }
 
 function EmailNotConfirmedBanner() {
+  const { t } = useTranslation();
   return (
     <div
       className="mb-4 p-4 rounded-xl space-y-3"
@@ -769,11 +772,10 @@ function EmailNotConfirmedBanner() {
         <span style={{ fontSize: 16, lineHeight: 1.2 }}>✉️</span>
         <div>
           <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--c-warn)" }}>
-            Email not confirmed
+            {t("sync.email_not_confirmed.title")}
           </p>
           <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-            Supabase requires you to verify your email before signing in.
-            Choose one of the options below:
+            {t("sync.email_not_confirmed.message")}
           </p>
         </div>
       </div>
@@ -784,11 +786,10 @@ function EmailNotConfirmedBanner() {
           style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
         >
           <p className="text-xs font-medium mb-1" style={{ color: "var(--c-text-1)" }}>
-            Option A — Confirm your email (recommended)
+            {t("sync.email_not_confirmed.option_a.title")}
           </p>
           <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-            Check your inbox for a confirmation email from Supabase and click the link.
-            Then come back here and click <strong>Connect and verify</strong> again.
+            {t("sync.email_not_confirmed.option_a.message")}
           </p>
         </div>
 
@@ -797,13 +798,13 @@ function EmailNotConfirmedBanner() {
           style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
         >
           <p className="text-xs font-medium mb-1" style={{ color: "var(--c-text-1)" }}>
-            Option B — Disable email confirmation in Supabase
+            {t("sync.email_not_confirmed.option_b.title")}
           </p>
           <ol className="text-xs space-y-0.5" style={{ color: "var(--c-text-2)" }}>
-            <li>1. Open your Supabase project dashboard</li>
-            <li>2. Go to <strong>Authentication → Providers → Email</strong></li>
-            <li>3. Turn off <strong>"Confirm email"</strong></li>
-            <li>4. Click <strong>Connect and verify</strong> again</li>
+            <li>{t("sync.email_not_confirmed.option_b.step1")}</li>
+            <li>{t("sync.email_not_confirmed.option_b.step2")}</li>
+            <li>{t("sync.email_not_confirmed.option_b.step3")}</li>
+            <li>{t("sync.email_not_confirmed.option_b.step4")}</li>
           </ol>
           <a
             href="https://supabase.com/dashboard/project/_/auth/providers"
@@ -812,7 +813,7 @@ function EmailNotConfirmedBanner() {
             className="inline-block mt-2 text-xs"
             style={{ color: "var(--c-accent)" }}
           >
-            Open Authentication settings →
+            {t("sync.email_not_confirmed.open_settings")}
           </a>
         </div>
       </div>
