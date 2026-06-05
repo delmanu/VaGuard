@@ -66,7 +66,7 @@ export default function UnlockScreen({ onUnlocked }: Props) {
           className="text-center font-bold text-xl mb-1"
           style={{ color: "var(--c-text-1)" }}
         >
-          Vault
+          VaGuard
         </h1>
         <p
           className="text-center text-sm mb-8"
