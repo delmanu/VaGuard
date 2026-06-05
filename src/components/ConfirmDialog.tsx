@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 /* ── Public types ─────────────────────────────────────────────────────────── */
 
@@ -61,8 +62,8 @@ export function useConfirm() {
 function ConfirmDialog({
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   variant = "default",
   onConfirm,
   onCancel,
@@ -70,6 +71,9 @@ function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
+  const resolvedConfirmLabel = confirmLabel ?? t("confirm.confirm");
+  const resolvedCancelLabel  = cancelLabel  ?? t("confirm.cancel");
   const isDanger = variant === "danger";
 
   /* Keyboard: Escape → cancel, Enter → confirm */
@@ -182,7 +186,7 @@ function ConfirmDialog({
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.75")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
           >
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
           <button
             type="button"
@@ -201,7 +205,7 @@ function ConfirmDialog({
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.85")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
           >
-            {confirmLabel}
+            {resolvedConfirmLabel}
           </button>
         </div>
       </div>

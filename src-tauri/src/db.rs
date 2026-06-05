@@ -296,4 +296,24 @@ impl Db {
         )?;
         Ok(())
     }
+
+    /// Re-encrypt every password with a new key (used when changing master password).
+    pub fn reencrypt_all(&self, old_key: &VaultKey, new_key: &VaultKey) -> Result<(), DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, encrypted_password FROM entries"
+        )?;
+        let rows: Vec<(i64, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<SqlResult<Vec<_>>>()?;
+
+        for (id, enc_pw) in rows {
+            let plaintext = decrypt(old_key, &enc_pw).map_err(DbError::Crypto)?;
+            let new_enc = encrypt(new_key, &plaintext).map_err(DbError::Crypto)?;
+            self.conn.execute(
+                "UPDATE entries SET encrypted_password = ?1 WHERE id = ?2",
+                params![new_enc, id],
+            )?;
+        }
+        Ok(())
+    }
 }

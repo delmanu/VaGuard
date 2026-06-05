@@ -565,6 +565,148 @@ pub fn sync_clear_config(
     Ok(())
 }
 
+/// Re-encrypt the entire vault with a new master password.
+///
+/// Flow: verify current password → generate new salt → derive new key →
+/// re-encrypt all entries → update sentinel and kdf_salt → update sync config.
+#[tauri::command]
+pub fn change_master_password(
+    current_password: String,
+    new_password: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    use base64::Engine as _;
+
+    let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
+
+    // 1. Verify current password by re-deriving the key from it.
+    //    This ensures the caller actually knows the current password,
+    //    not just that the vault is already unlocked.
+    {
+        let (db, _) = vault_open(&s)?;
+        let salt_b64 = db
+            .get_meta("kdf_salt")
+            .map_err(|e| AppError(e.to_string()))?
+            .ok_or_else(|| AppError("kdf_salt not found".into()))?;
+        let salt = base64::engine::general_purpose::STANDARD
+            .decode(&salt_b64)?;
+        let derived = derive_key(&current_password, &salt)?;
+        let sentinel_blob = db
+            .get_meta("sentinel")
+            .map_err(|e| AppError(e.to_string()))?
+            .ok_or_else(|| AppError("Sentinel not found — vault may be corrupted".into()))?;
+        let plain = decrypt(&derived, &sentinel_blob)
+            .map_err(|_| AppError("Wrong current password".into()))?;
+        if plain != b"vault-ok" {
+            return Err(AppError("Wrong current password".into()));
+        }
+    }
+
+    // 2. Snapshot current key bytes so we can create a temp copy later.
+    let current_key_bytes = s
+        .key
+        .as_ref()
+        .ok_or_else(|| AppError("Vault is locked".into()))?
+        .0;
+    let sync_config = s.sync_config.clone();
+
+    // 3. Generate a fresh salt and derive the new key.
+    let mut new_salt = vec![0u8; 32];
+    OsRng.fill(new_salt.as_mut_slice());
+    let new_key = derive_key(&new_password, &new_salt)?;
+
+    // 4. Re-encrypt all entries and update DB metadata.
+    {
+        let (db, _) = vault_open(&s)?;
+        let temp_old = VaultKey(current_key_bytes);
+        db.reencrypt_all(&temp_old, &new_key)?;
+
+        let new_salt_b64 = base64::engine::general_purpose::STANDARD.encode(&new_salt);
+        db.set_meta("kdf_salt", &new_salt_b64)
+            .map_err(|e| AppError(e.to_string()))?;
+
+        let new_sentinel = encrypt(&new_key, b"vault-ok")?;
+        db.set_meta("sentinel", &new_sentinel)
+            .map_err(|e| AppError(e.to_string()))?;
+    }
+
+    // 5. Re-encrypt sync config on disk with the new key.
+    if let Some(ref cfg) = sync_config {
+        let dir = app_data_dir(&app);
+        sync::save_sync_config(&dir, &new_key, cfg)?;
+    }
+
+    // 6. Swap the in-memory key.
+    s.key = Some(new_key);
+    Ok(())
+}
+
+/// Decrypt and export all vault entries as a pretty-printed JSON string.
+/// The caller is responsible for saving the string to a file.
+#[tauri::command]
+pub fn export_vault(state: State<'_, AppState>) -> Result<String> {
+    #[derive(serde::Serialize)]
+    struct ExportEntry {
+        title: String,
+        username: String,
+        password: String,
+        url: Option<String>,
+        notes: Option<String>,
+    }
+
+    let s = state.lock().map_err(|e| AppError(e.to_string()))?;
+    let (db, key) = vault_open(&s)?;
+    let entries = db.list_entries(key)?;
+
+    let export: Vec<ExportEntry> = entries
+        .into_iter()
+        .map(|e| ExportEntry {
+            title:    e.title,
+            username: e.username,
+            password: e.password,
+            url:      e.url,
+            notes:    e.notes,
+        })
+        .collect();
+
+    Ok(serde_json::to_string_pretty(&export)?)
+}
+
+/// Import entries from a JSON string (output of `export_vault`).
+/// Each entry gets a fresh sync_id. Returns the count of imported entries.
+#[tauri::command]
+pub fn import_vault(json: String, state: State<'_, AppState>) -> Result<usize> {
+    #[derive(serde::Deserialize)]
+    struct ImportEntry {
+        title: String,
+        username: String,
+        password: String,
+        url: Option<String>,
+        notes: Option<String>,
+    }
+
+    let items: Vec<ImportEntry> = serde_json::from_str(&json)
+        .map_err(|e| AppError(format!("Invalid JSON: {e}")))?;
+
+    let s = state.lock().map_err(|e| AppError(e.to_string()))?;
+    let (db, key) = vault_open(&s)?;
+
+    let mut imported = 0usize;
+    for item in items {
+        db.create_entry(key, NewEntry {
+            title:    item.title,
+            username: item.username,
+            password: item.password,
+            url:      item.url,
+            notes:    item.notes,
+        })?;
+        imported += 1;
+    }
+
+    Ok(imported)
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 fn vault_open(s: &VaultState) -> Result<(&Db, &VaultKey)> {

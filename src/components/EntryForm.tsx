@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import type { Entry, NewEntry } from "../types";
 import PasswordGenerator from "./PasswordGenerator";
 import { useConfirm } from "./ConfirmDialog";
@@ -18,7 +19,16 @@ function isValidUrl(value: string) {
   catch { return false; }
 }
 
+const CONFLICT_FIELDS: { key: keyof NewEntry; i18nKey: string }[] = [
+  { key: "title",    i18nKey: "conflict.field.title" },
+  { key: "username", i18nKey: "conflict.field.username" },
+  { key: "password", i18nKey: "conflict.field.password" },
+  { key: "url",      i18nKey: "conflict.field.url" },
+  { key: "notes",    i18nKey: "conflict.field.notes" },
+];
+
 export default function EntryForm({ initial, onSave, onCancel, onDelete, onConflictResolved }: Props) {
+  const { t } = useTranslation();
   const { confirm, dialog } = useConfirm();
   const [form, setForm] = useState<NewEntry>({
     title:    initial?.title    ?? "",
@@ -51,23 +61,23 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
     setForm((f) => ({ ...f, [field]: value }));
   }
   function touch(field: keyof NewEntry) {
-    setTouched((t) => ({ ...t, [field]: true }));
+    setTouched((prev) => ({ ...prev, [field]: true }));
   }
 
   const errors = {
-    title:    !form.title.trim()                          ? "Title is required"    : null,
-    url:      touched.url && !isValidUrl(form.url ?? "")  ? "Invalid URL"          : null,
-    password: !form.password.trim()                       ? "Password is required" : null,
+    title:    !form.title.trim()                          ? t("entry.error.title_required")    : null,
+    url:      touched.url && !isValidUrl(form.url ?? "")  ? t("entry.error.invalid_url")        : null,
+    password: !form.password.trim()                       ? t("entry.error.password_required")  : null,
   };
   const isValid = !errors.title && !errors.url && !errors.password;
 
   async function handleCancel() {
     if (dirty) {
       const ok = await confirm({
-        title: "Discard changes",
-        message: "You have unsaved changes. Are you sure you want to discard them?",
-        confirmLabel: "Discard",
-        cancelLabel: "Keep editing",
+        title: t("entry.discard.title"),
+        message: t("entry.discard.message"),
+        confirmLabel: t("entry.discard.confirm"),
+        cancelLabel: t("entry.discard.cancel"),
         variant: "danger",
       });
       if (!ok) return;
@@ -95,7 +105,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
         style={{ borderBottom: "1px solid var(--c-border)" }}
       >
         <h2 className="font-semibold text-sm" style={{ color: "var(--c-text-1)" }}>
-          {initial ? "Edit entry" : "New entry"}
+          {initial ? t("entry.title.edit") : t("entry.title.new")}
         </h2>
         <button
           onClick={handleCancel}
@@ -119,7 +129,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
         className="flex-1 overflow-y-auto px-5 py-4 space-y-4"
       >
         <Field
-          label="Title"
+          label={t("entry.field.title")}
           required
           error={touched.title ? errors.title : null}
         >
@@ -129,25 +139,25 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
             value={form.title}
             onChange={(e) => set("title", e.target.value)}
             onBlur={() => touch("title")}
-            placeholder="e.g. GitHub"
+            placeholder={t("entry.placeholder.title")}
             className="form-input"
             style={inputStyle(!!touched.title && !!errors.title)}
           />
         </Field>
 
-        <Field label="Username / email">
+        <Field label={t("entry.field.username")}>
           <input
             type="text"
             value={form.username}
             onChange={(e) => set("username", e.target.value)}
-            placeholder="you@example.com"
+            placeholder={t("entry.placeholder.username")}
             className="form-input"
             style={inputStyle(false)}
           />
         </Field>
 
         {/* Password */}
-        <Field label="Password" required error={touched.password ? errors.password : null}>
+        <Field label={t("entry.field.password")} required error={touched.password ? errors.password : null}>
           <div className="flex gap-2">
             {/* Input + copy — visually joined */}
             <div className="flex flex-1">
@@ -157,7 +167,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
                   value={form.password}
                   onChange={(e) => set("password", e.target.value)}
                   onBlur={() => touch("password")}
-                  placeholder="••••••••••••"
+                  placeholder={t("entry.placeholder.password")}
                   className="form-input w-full pr-9"
                   style={{
                     ...inputStyle(!!touched.password && !!errors.password),
@@ -182,7 +192,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
                 type="button"
                 tabIndex={-1}
                 onClick={copyPassword}
-                title={pwCopied ? "Copied!" : "Copy password"}
+                title={pwCopied ? t("entry.pw_copied") : t("entry.copy_password")}
                 style={{
                   background:            "var(--c-surface-3)",
                   color:                 pwCopied ? "var(--c-success)" : "var(--c-text-3)",
@@ -211,7 +221,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
                 color: showGen ? "white" : "var(--c-text-2)",
               }}
             >
-              Generate
+              {t("entry.generate")}
             </button>
           </div>
 
@@ -228,24 +238,24 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
           )}
         </Field>
 
-        <Field label="URL" error={touched.url ? errors.url : null}>
+        <Field label={t("entry.field.url")} error={touched.url ? errors.url : null}>
           <input
             type="text"
             value={form.url ?? ""}
             onChange={(e) => set("url", e.target.value)}
             onBlur={() => touch("url")}
-            placeholder="https://example.com"
+            placeholder={t("entry.placeholder.url")}
             className="form-input"
             style={inputStyle(!!touched.url && !!errors.url)}
           />
         </Field>
 
-        <Field label="Notes">
+        <Field label={t("entry.field.notes")}>
           <textarea
             value={form.notes ?? ""}
             onChange={(e) => set("notes", e.target.value)}
             rows={3}
-            placeholder="Optional notes…"
+            placeholder={t("entry.placeholder.notes")}
             className="form-input resize-none"
             style={{ ...inputStyle(false), lineHeight: 1.5 }}
           />
@@ -276,15 +286,15 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
             type="button"
             onClick={async () => {
               const ok = await confirm({
-                title: `Delete "${initial.title}"`,
-                message: "This action is permanent and cannot be undone.",
-                confirmLabel: "Delete",
+                title: t("entry.delete.dialog_title", { title: initial.title }),
+                message: t("entry.delete.message"),
+                confirmLabel: t("entry.delete"),
                 variant: "danger",
               });
               if (ok) onDelete();
             }}
             className="p-2 rounded-lg transition-colors"
-            title="Delete entry"
+            title={t("entry.delete.label")}
             style={{ color: "var(--c-danger)", background: "rgba(248,113,113,0.08)" }}
             onMouseEnter={(e) =>
               ((e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.18)")
@@ -305,7 +315,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
           className="px-4 py-2 rounded-lg text-sm transition-colors"
           style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
         >
-          Cancel
+          {t("entry.cancel")}
         </button>
         <button
           type="submit"
@@ -319,7 +329,7 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
           }}
         >
           <SaveIcon />
-          Save
+          {t("entry.save")}
         </button>
       </div>
     </div>
@@ -327,14 +337,6 @@ export default function EntryForm({ initial, onSave, onCancel, onDelete, onConfl
 }
 
 /* ── Conflict panel ──────────────────────────────────────────────────────── */
-
-const CONFLICT_FIELDS: { key: keyof NewEntry; label: string }[] = [
-  { key: "title",    label: "Title" },
-  { key: "username", label: "Username" },
-  { key: "password", label: "Password" },
-  { key: "url",      label: "URL" },
-  { key: "notes",    label: "Notes" },
-];
 
 function ConflictPanel({
   entryId,
@@ -347,6 +349,7 @@ function ConflictPanel({
   cloudJson: string;
   onResolved: () => void;
 }) {
+  const { t } = useTranslation();
   const [resolving, setResolving]     = useState(false);
   const [showLocalPw, setShowLocalPw] = useState(false);
   const [showCloudPw, setShowCloudPw] = useState(false);
@@ -386,15 +389,15 @@ function ConflictPanel({
       <div className="flex items-center gap-2">
         <span style={{ fontSize: 14, lineHeight: 1 }}>⚠</span>
         <p className="text-xs font-semibold" style={{ color: "var(--c-warn)" }}>
-          Sync conflict
+          {t("entry.conflict.title")}
         </p>
       </div>
       <p className="text-xs" style={{ color: "var(--c-text-2)" }}>
-        The following fields differ from the version saved in the cloud:
+        {t("entry.conflict.message")}
       </p>
 
       <div className="space-y-2">
-        {diffFields.map(({ key, label }) => {
+        {diffFields.map(({ key, i18nKey }) => {
           const local  = String(localEntry[key] ?? "—");
           const remote = String(cloud[key]      ?? "—");
           const masked = key === "password";
@@ -405,12 +408,12 @@ function ConflictPanel({
               style={{ background: "var(--c-surface-2)", border: "1px solid var(--c-border)" }}
             >
               <p className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                {label}
+                {t(i18nKey)}
               </p>
               <div className="flex gap-2 text-xs">
                 <div className="flex-1 space-y-0.5">
                   <div className="flex items-center justify-between">
-                    <p style={{ color: "var(--c-text-3)" }}>Local</p>
+                    <p style={{ color: "var(--c-text-3)" }}>{t("entry.conflict.local")}</p>
                     {masked && (
                       <button
                         type="button"
@@ -432,7 +435,7 @@ function ConflictPanel({
                 <div style={{ width: 1, background: "var(--c-border)", flexShrink: 0 }} />
                 <div className="flex-1 space-y-0.5">
                   <div className="flex items-center justify-between">
-                    <p style={{ color: "var(--c-text-3)" }}>Cloud</p>
+                    <p style={{ color: "var(--c-text-3)" }}>{t("entry.conflict.cloud")}</p>
                     {masked && (
                       <button
                         type="button"
@@ -465,7 +468,7 @@ function ConflictPanel({
           className="flex-1 py-2 rounded-lg text-xs font-medium"
           style={{ background: "var(--c-surface-3)", color: "var(--c-text-2)" }}
         >
-          Keep local
+          {t("entry.conflict.keep_local")}
         </button>
         <button
           type="button"
@@ -474,7 +477,7 @@ function ConflictPanel({
           className="flex-1 py-2 rounded-lg text-xs font-medium"
           style={{ background: "rgba(251,191,36,0.18)", color: "var(--c-warn)" }}
         >
-          Use cloud version
+          {t("entry.conflict.keep_cloud")}
         </button>
       </div>
     </div>
