@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { useConfirm } from "./ConfirmDialog";
+import i18n from "../i18n/index";
 
 // ── localStorage keys ─────────────────────────────────────────────────────────
 export const THEME_KEY    = "vaguard_theme";
 export const LOCK_KEY     = "vaguard_lock_timeout";
 export const GEN_KEY      = "vaguard_gen_defaults";
+export const LANG_KEY     = "vaguard_language";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -46,11 +49,22 @@ export default function SettingsPanel({
   onClose: () => void;
   onEntriesChanged?: () => void;
 }) {
+  const { t } = useTranslation();
   const { confirm, dialog } = useConfirm();
 
   // Appearance
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem(THEME_KEY) as Theme | null) ?? "system"
+  );
+
+  // Language
+  const [language, setLanguage] = useState<string>(
+    () => {
+      const stored = localStorage.getItem(LANG_KEY);
+      if (stored === "en" || stored === "es") return stored;
+      const nav = navigator.language?.toLowerCase() ?? "";
+      return nav.startsWith("es") ? "es" : "en";
+    }
   );
 
   // Auto-lock
@@ -84,10 +98,17 @@ export default function SettingsPanel({
   }, [onClose]);
 
   // Persist theme
-  function handleTheme(t: Theme) {
-    setTheme(t);
-    localStorage.setItem(THEME_KEY, t);
-    applyTheme(t);
+  function handleTheme(themeVal: Theme) {
+    setTheme(themeVal);
+    localStorage.setItem(THEME_KEY, themeVal);
+    applyTheme(themeVal);
+  }
+
+  // Persist language
+  function handleLanguage(lang: string) {
+    setLanguage(lang);
+    localStorage.setItem(LANG_KEY, lang);
+    i18n.changeLanguage(lang);
   }
 
   // Persist auto-lock
@@ -110,20 +131,18 @@ export default function SettingsPanel({
     setPwSuccess(false);
 
     if (newPw.length < 8) {
-      setPwError("New password must be at least 8 characters.");
+      setPwError(t("settings.security.error.min_length"));
       return;
     }
     if (newPw !== confirmPw) {
-      setPwError("New passwords do not match.");
+      setPwError(t("settings.security.error.mismatch"));
       return;
     }
 
     const ok = await confirm({
-      title: "Change master password",
-      message:
-        "All your entries will be re-encrypted with the new password. " +
-        "Make sure you remember it — it cannot be recovered.",
-      confirmLabel: "Change password",
+      title: t("settings.security.change_password"),
+      message: t("settings.security.change_confirm.message"),
+      confirmLabel: t("settings.security.change_confirm.button"),
       variant: "danger",
     });
     if (!ok) return;
@@ -158,7 +177,7 @@ export default function SettingsPanel({
       a.download = `vaguard-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setDataMsg({ type: "ok", text: "Export downloaded." });
+      setDataMsg({ type: "ok", text: t("settings.data.exported") });
     } catch (err) {
       setDataMsg({ type: "err", text: String(err) });
     } finally {
@@ -170,14 +189,14 @@ export default function SettingsPanel({
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ""; // reset so same file can be re-imported
+    e.target.value = "";
 
     setDataMsg(null);
     setImportBusy(true);
     try {
-      const json = await file.text();
+      const json  = await file.text();
       const count = await invoke<number>("import_vault", { json });
-      setDataMsg({ type: "ok", text: `${count} ${count === 1 ? "entry" : "entries"} imported.` });
+      setDataMsg({ type: "ok", text: t("settings.data.imported", { count }) });
       onEntriesChanged?.();
     } catch (err) {
       setDataMsg({ type: "err", text: String(err) });
@@ -186,12 +205,18 @@ export default function SettingsPanel({
     }
   }
 
-  const LOCK_OPTIONS: { label: string; value: number }[] = [
-    { label: "Never",   value: 0  },
-    { label: "5 min",   value: 5  },
-    { label: "15 min",  value: 15 },
-    { label: "30 min",  value: 30 },
-    { label: "1 hour",  value: 60 },
+  const LOCK_OPTIONS: { i18nKey: string; value: number }[] = [
+    { i18nKey: "settings.security.autolock.never", value: 0  },
+    { i18nKey: "settings.security.autolock.5",     value: 5  },
+    { i18nKey: "settings.security.autolock.15",    value: 15 },
+    { i18nKey: "settings.security.autolock.30",    value: 30 },
+    { i18nKey: "settings.security.autolock.60",    value: 60 },
+  ];
+
+  const GEN_OPTIONS: [string, keyof GenDefaults][] = [
+    [t("settings.generator.uppercase"), "upper"],
+    [t("settings.generator.numbers"),   "numbers"],
+    [t("settings.generator.symbols"),   "symbols"],
   ];
 
   return (
@@ -210,7 +235,7 @@ export default function SettingsPanel({
 
       {/* Panel */}
       <div
-        className="slide-in-right"
+        className="slide-in-right m-[0.25rem] rounded-lg"
         style={{
           position: "absolute", top: 0, right: 0, bottom: 0,
           zIndex: 301,
@@ -230,7 +255,7 @@ export default function SettingsPanel({
           <div className="flex items-center gap-2">
             <GearIcon />
             <span className="text-sm font-semibold" style={{ color: "var(--c-text-1)" }}>
-              Settings
+              {t("settings.title")}
             </span>
           </div>
           <button
@@ -252,39 +277,66 @@ export default function SettingsPanel({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
 
           {/* ── Appearance ─────────────────────────────────────────────── */}
-          <Section title="Appearance" icon={<PaletteIcon />}>
+          <Section title={t("settings.appearance.title")} icon={<PaletteIcon />}>
+            {/* Theme */}
             <div className="space-y-1">
               <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                Theme
+                {t("settings.appearance.theme")}
               </label>
               <div className="flex gap-2">
-                {(["dark", "light", "system"] as Theme[]).map((t) => (
+                {(["dark", "light", "system"] as Theme[]).map((themeVal) => (
                   <button
-                    key={t}
-                    onClick={() => handleTheme(t)}
-                    className="flex-1 py-2 rounded-lg text-xs font-medium capitalize transition-colors"
+                    key={themeVal}
+                    onClick={() => handleTheme(themeVal)}
+                    className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
                     style={{
-                      background: theme === t ? "var(--c-accent)" : "var(--c-surface-2)",
-                      color: theme === t ? "white" : "var(--c-text-2)",
-                      border: `1px solid ${theme === t ? "var(--c-accent)" : "var(--c-border)"}`,
+                      background: theme === themeVal ? "var(--c-accent)" : "var(--c-surface-2)",
+                      color: theme === themeVal ? "white" : "var(--c-text-2)",
+                      border: `1px solid ${theme === themeVal ? "var(--c-accent)" : "var(--c-border)"}`,
                     }}
                   >
-                    {t}
+                    {t(`settings.appearance.theme.${themeVal}`)}
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* Language */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
+                {t("settings.appearance.language")}
+              </label>
+              <select
+                value={language}
+                onChange={(e) => handleLanguage(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+                style={{
+                  background: "var(--c-surface-2)",
+                  color: "var(--c-text-1)",
+                  border: "1px solid var(--c-border)",
+                }}
+                onFocus={(e) =>
+                  ((e.target as HTMLSelectElement).style.borderColor = "var(--c-accent)")
+                }
+                onBlur={(e) =>
+                  ((e.target as HTMLSelectElement).style.borderColor = "var(--c-border)")
+                }
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
           </Section>
 
           {/* ── Security ───────────────────────────────────────────────── */}
-          <Section title="Security" icon={<ShieldSmIcon />}>
+          <Section title={t("settings.security.title")} icon={<ShieldSmIcon />}>
             {/* Auto-lock */}
             <div className="space-y-1">
               <label className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                Auto-lock after inactivity
+                {t("settings.security.autolock")}
               </label>
               <div className="flex flex-wrap gap-2">
-                {LOCK_OPTIONS.map(({ label, value }) => (
+                {LOCK_OPTIONS.map(({ i18nKey, value }) => (
                   <button
                     key={value}
                     onClick={() => handleLockTimeout(value)}
@@ -295,7 +347,7 @@ export default function SettingsPanel({
                       border: `1px solid ${lockTimeout === value ? "var(--c-accent)" : "var(--c-border)"}`,
                     }}
                   >
-                    {label}
+                    {t(i18nKey)}
                   </button>
                 ))}
               </div>
@@ -305,7 +357,7 @@ export default function SettingsPanel({
             {unlocked ? (
               <form onSubmit={handleChangePw} className="space-y-3 pt-1">
                 <p className="text-xs font-medium" style={{ color: "var(--c-text-2)" }}>
-                  Change master password
+                  {t("settings.security.change_password")}
                 </p>
 
                 {pwError && (
@@ -329,33 +381,33 @@ export default function SettingsPanel({
                       border: "1px solid rgba(74,222,128,0.2)",
                     }}
                   >
-                    ✓ Master password updated.
+                    {t("settings.security.updated")}
                   </p>
                 )}
 
                 <PwField
-                  label="Current password"
+                  label={t("settings.security.current_password")}
                   value={currentPw}
                   onChange={setCurrentPw}
                   show={showPws}
                   onToggle={() => setShowPws((v) => !v)}
-                  placeholder="Current master password"
+                  placeholder={t("settings.security.current_password_placeholder")}
                 />
                 <PwField
-                  label="New password"
+                  label={t("settings.security.new_password")}
                   value={newPw}
                   onChange={setNewPw}
                   show={showPws}
                   onToggle={() => setShowPws((v) => !v)}
-                  placeholder="At least 8 characters"
+                  placeholder={t("settings.security.new_password_placeholder")}
                 />
                 <PwField
-                  label="Confirm new password"
+                  label={t("settings.security.confirm_password")}
                   value={confirmPw}
                   onChange={setConfirmPw}
                   show={showPws}
                   onToggle={() => setShowPws((v) => !v)}
-                  placeholder="Repeat new password"
+                  placeholder={t("settings.security.confirm_password_placeholder")}
                 />
 
                 <button
@@ -374,25 +426,25 @@ export default function SettingsPanel({
                     border: "1px solid rgba(248,113,113,0.2)",
                   }}
                 >
-                  {pwBusy ? "Updating…" : "Update master password"}
+                  {pwBusy ? t("settings.security.updating") : t("settings.security.save_password")}
                 </button>
               </form>
             ) : (
               <p className="text-xs" style={{ color: "var(--c-text-3)" }}>
-                Unlock the vault to change the master password.
+                {t("settings.security.unlock_hint")}
               </p>
             )}
           </Section>
 
           {/* ── Password Generator ─────────────────────────────────────── */}
-          <Section title="Password Generator" icon={<KeyIcon />}>
+          <Section title={t("settings.generator.title")} icon={<KeyIcon />}>
             <p className="text-xs" style={{ color: "var(--c-text-3)" }}>
-              Default settings used when opening the generator.
+              {t("settings.generator.hint")}
             </p>
 
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs" style={{ color: "var(--c-text-2)" }}>
-                <span>Default length</span>
+                <span>{t("settings.generator.length")}</span>
                 <span className="font-mono font-semibold" style={{ color: "var(--c-text-1)" }}>
                   {genDef.length}
                 </span>
@@ -410,13 +462,7 @@ export default function SettingsPanel({
             </div>
 
             <div className="flex flex-wrap gap-x-4 gap-y-2">
-              {(
-                [
-                  ["Uppercase", "upper"],
-                  ["Numbers",   "numbers"],
-                  ["Symbols",   "symbols"],
-                ] as [string, keyof GenDefaults][]
-              ).map(([label, key]) => (
+              {GEN_OPTIONS.map(([label, key]) => (
                 <label
                   key={key}
                   className="flex items-center gap-1.5 cursor-pointer select-none text-xs"
@@ -436,7 +482,7 @@ export default function SettingsPanel({
 
           {/* ── Data ───────────────────────────────────────────────────── */}
           {unlocked && (
-            <Section title="Data" icon={<DatabaseIcon />}>
+            <Section title={t("settings.data.title")} icon={<DatabaseIcon />}>
               {dataMsg && (
                 <p
                   className="text-xs p-2.5 rounded-lg"
@@ -453,17 +499,17 @@ export default function SettingsPanel({
               )}
 
               <DataRow
-                title="Export vault"
-                description="Download all entries as an unencrypted JSON file."
-                buttonLabel={exportBusy ? "Exporting…" : "Export"}
+                title={t("settings.data.export")}
+                description={t("settings.data.export_description")}
+                buttonLabel={exportBusy ? t("settings.data.export_busy") : t("settings.data.export_button")}
                 disabled={exportBusy || importBusy}
                 onClick={handleExport}
               />
 
               <DataRow
-                title="Import vault"
-                description="Add entries from a VaGuard JSON export. Duplicates are not filtered."
-                buttonLabel={importBusy ? "Importing…" : "Import"}
+                title={t("settings.data.import")}
+                description={t("settings.data.import_description")}
+                buttonLabel={importBusy ? t("settings.data.import_busy") : t("settings.data.import_button")}
                 disabled={exportBusy || importBusy}
                 onClick={() => fileRef.current?.click()}
               />
