@@ -1,8 +1,9 @@
-# 🔐 Vault — Team Password Manager
+# 🔐 VaGuard — Password Manager
 
-> A local-first, zero-knowledge password manager for Windows teams,
+> A local-first, zero-knowledge password manager for Windows,
 > built with Tauri v2, Rust, React, and TypeScript.
 
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?logo=windows)
 ![Rust](https://img.shields.io/badge/backend-Rust-orange?logo=rust)
 ![TypeScript](https://img.shields.io/badge/frontend-TypeScript-3178c6?logo=typescript)
@@ -17,6 +18,9 @@
 - **SQLite local database** — fast, portable, fully offline
 - **Cryptographically secure password generator** — powered by `OsRng`, configurable length and charset
 - **Zero-knowledge cloud sync** — optional. Your vault is encrypted *before* it leaves your device; your Supabase project never sees plaintext
+- **Auto-lock with live countdown** — configurable inactivity timer displayed in real-time in the titlebar; reacts instantly to setting changes
+- **Persistent sync sessions** — Supabase refresh token stored encrypted on disk; sessions are restored automatically on unlock for up to 7 days
+- **Native export dialog** — vault export opens the OS file picker so you choose folder and filename
 - **No servers of our own** — this project has no backend. Your data belongs to you
 
 ---
@@ -27,7 +31,7 @@
 
 Go to the [**Releases**](../../releases) page and download the latest `.msi` installer for Windows.
 
-Run the installer and launch **Vault** from the Start Menu.
+Run the installer and launch **VaGuard** from the Start Menu.
 
 ### 2 · Set your master password
 
@@ -78,8 +82,8 @@ using (
 ### Run in development
 
 ```powershell
-git clone https://github.com/YOUR_USERNAME/vaguard.git
-cd vaguard
+git clone https://github.com/delmanu/VaGuard.git
+cd VaGuard
 npm install
 npm run tauri dev
 ```
@@ -112,7 +116,8 @@ src-tauri/target/release/bundle/nsis/
 | Vault key | Derived with Argon2id (64 MiB, 3 passes); never persisted |
 | Master password | Never stored anywhere — not even hashed |
 | Sync config (URL, API key) | AES-256-GCM encrypted at rest (`sync_config.enc`) |
-| Supabase JWT | In-memory only; cleared when vault locks |
+| Supabase refresh token | AES-256-GCM encrypted at rest inside `sync_config.enc`; valid up to 7 days |
+| Supabase JWT | In-memory only; cleared when vault locks; restored silently on unlock via refresh token |
 | Cloud blob | Fully encrypted before upload; server is zero-knowledge |
 
 ### Key design decisions
@@ -129,6 +134,20 @@ src-tauri/target/release/bundle/nsis/
 
 Please open a [GitHub Issue](../../issues) labelled `security` or contact the
 maintainer directly. Do not include credentials or vault data in bug reports.
+
+---
+
+## 📋 Changelog
+
+### v1.1.0
+- **feat** — Auto-lock countdown displayed live in the titlebar
+- **feat** — Supabase sessions persist up to 7 days via encrypted refresh token
+- **feat** — Native OS save dialog when exporting the vault
+- **fix** — Vault list refreshes automatically after importing entries
+- **fix** — Confirm dialog always renders above the settings panel
+
+### v1.0.0
+- Initial public release
 
 ---
 
