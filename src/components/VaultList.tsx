@@ -245,7 +245,7 @@ export default function VaultList({ onLock, refreshKey }: { onLock: () => void; 
 
           {filtered.length === 0 && (
             <div className="flex flex-col items-center pt-10 pb-4 px-4 text-center">
-              <span style={{ fontSize: 32 }}>🔍</span>
+              <EmptyListIcon />
               <p className="text-xs mt-2" style={{ color: "var(--c-text-3)" }}>
                 {search
                   ? t("vault.empty.search")
@@ -650,6 +650,20 @@ function RevealPasswordOverlay({
 }
 
 /* ── Icons ───────────────────────────────────────────────────────────────── */
+
+function EmptyListIcon() {
+  return (
+    <svg width="38" height="38" viewBox="0 0 24 24" fill="none"
+      stroke="var(--c-text-3)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"
+      style={{ opacity: 0.45 }}>
+      {/* Shield — the vault */}
+      <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" />
+      {/* Dashed lines — empty content */}
+      <line x1="8.5" y1="10.5" x2="15.5" y2="10.5" strokeDasharray="1.8 1.4" />
+      <line x1="8.5" y1="13.5" x2="13"   y2="13.5" strokeDasharray="1.8 1.4" />
+    </svg>
+  );
+}
 
 function SearchIcon({ className }: { className?: string }) {
   return (
