@@ -44,10 +44,12 @@ export default function SettingsPanel({
   unlocked,
   onClose,
   onEntriesChanged,
+  onLockTimeoutChange,
 }: {
   unlocked: boolean;
   onClose: () => void;
   onEntriesChanged?: () => void;
+  onLockTimeoutChange?: (val: number) => void;
 }) {
   const { t } = useTranslation();
   const { confirm, dialog } = useConfirm();
@@ -115,6 +117,7 @@ export default function SettingsPanel({
   function handleLockTimeout(val: number) {
     setLockTimeout(val);
     localStorage.setItem(LOCK_KEY, String(val));
+    onLockTimeoutChange?.(val);
   }
 
   // Persist generator defaults

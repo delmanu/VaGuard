@@ -6,9 +6,11 @@ import VaultList from "./components/VaultList";
 import SettingsPanel, { applyTheme, LOCK_KEY, THEME_KEY, type Theme } from "./components/SettingsPanel";
 
 export default function App() {
-  const [unlocked, setUnlocked]         = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const lastActivityRef                 = useRef(Date.now());
+  const [unlocked, setUnlocked]               = useState(false);
+  const [settingsOpen, setSettingsOpen]       = useState(false);
+  const [lockSecondsLeft, setLockSecondsLeft] = useState<number | null>(null);
+  const [lockTimeout, setLockTimeout]         = useState(() => parseInt(localStorage.getItem(LOCK_KEY) || "0"));
+  const lastActivityRef                       = useRef(Date.now());
 
   // Apply saved theme on first mount
   useEffect(() => {
@@ -23,31 +25,43 @@ export default function App() {
     return () => document.removeEventListener("contextmenu", suppress);
   }, []);
 
-  // Auto-lock on inactivity
+  // Auto-lock on inactivity + live countdown
   useEffect(() => {
-    if (!unlocked) return;
+    if (!unlocked) {
+      setLockSecondsLeft(null);
+      return;
+    }
 
-    const timeout = parseInt(localStorage.getItem(LOCK_KEY) || "0");
-    if (timeout === 0) return;
+    if (lockTimeout === 0) {
+      setLockSecondsLeft(null);
+      return;
+    }
 
-    const ms = timeout * 60 * 1000;
+    lastActivityRef.current = Date.now();
+    const ms = lockTimeout * 60 * 1000;
 
     function resetTimer() { lastActivityRef.current = Date.now(); }
     document.addEventListener("mousemove", resetTimer);
     document.addEventListener("keydown",   resetTimer);
 
     const interval = setInterval(() => {
-      if (Date.now() - lastActivityRef.current > ms) {
+      const elapsed    = Date.now() - lastActivityRef.current;
+      const remaining  = ms - elapsed;
+      if (remaining <= 0) {
+        setLockSecondsLeft(null);
         invoke("lock_vault").then(() => setUnlocked(false));
+      } else {
+        setLockSecondsLeft(Math.ceil(remaining / 1000));
       }
-    }, 15_000);
+    }, 1_000);
 
     return () => {
       document.removeEventListener("mousemove", resetTimer);
       document.removeEventListener("keydown",   resetTimer);
       clearInterval(interval);
+      setLockSecondsLeft(null);
     };
-  }, [unlocked]);
+  }, [unlocked, lockTimeout]);
 
   return (
     <div
@@ -56,6 +70,7 @@ export default function App() {
     >
       <Titlebar
         unlocked={unlocked}
+        lockSecondsLeft={lockSecondsLeft}
         onLock={() => setUnlocked(false)}
         onSettings={() => setSettingsOpen((v) => !v)}
       />
@@ -71,6 +86,7 @@ export default function App() {
           <SettingsPanel
             unlocked={unlocked}
             onClose={() => setSettingsOpen(false)}
+            onLockTimeoutChange={setLockTimeout}
           />
         )}
       </main>
