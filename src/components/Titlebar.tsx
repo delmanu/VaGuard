@@ -5,11 +5,12 @@ import { useTranslation } from "react-i18next";
 
 interface Props {
   unlocked: boolean;
+  lockSecondsLeft?: number | null;
   onLock: () => void;
   onSettings: () => void;
 }
 
-export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
+export default function Titlebar({ unlocked, lockSecondsLeft, onLock, onSettings }: Props) {
   const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -48,7 +49,7 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
         borderBottom: "1px solid var(--c-border)",
       }}
     >
-      {/* ── Left: logo + name ────────────────────────────────────────────── */}
+      {/* ── Left: logo + name + countdown ───────────────────────────────── */}
       <div className="flex items-center gap-2.5 px-4 h-full">
         <ShieldIcon />
         <span
@@ -57,6 +58,9 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
         >
           VaGuard
         </span>
+        {lockSecondsLeft != null && (
+          <LockCountdown seconds={lockSecondsLeft} />
+        )}
       </div>
 
       {/* ── Right: status + lock | window controls ───────────────────────── */}
@@ -155,6 +159,47 @@ export default function Titlebar({ unlocked, onLock, onSettings }: Props) {
 
       </div>
     </header>
+  );
+}
+
+/* ── Lock countdown badge ────────────────────────────────────────────────── */
+
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function LockCountdown({ seconds }: { seconds: number }) {
+  const { t } = useTranslation();
+  const isCritical = seconds <= 30;
+  const isWarning  = !isCritical && seconds <= 120;
+
+  const bg    = isCritical ? "rgba(248,113,113,0.12)"
+              : isWarning  ? "rgba(251,191,36,0.10)"
+              :              "var(--c-surface-2)";
+  const color = isCritical ? "var(--c-danger)"
+              : isWarning  ? "#f59e0b"
+              :              "var(--c-text-3)";
+
+  const label = formatCountdown(seconds);
+
+  return (
+    <div
+      className="flex items-center gap-1 px-2 py-0.5 rounded-full"
+      style={{
+        background: bg,
+        color,
+        fontSize: 11,
+        fontVariantNumeric: "tabular-nums",
+        border: `1px solid ${isCritical ? "rgba(248,113,113,0.2)" : isWarning ? "rgba(251,191,36,0.2)" : "var(--c-border)"}`,
+        transition: "background 0.4s, color 0.4s, border-color 0.4s",
+      }}
+      title={t("titlebar.autolock_tooltip", { time: label })}
+    >
+      <TimerIcon />
+      <span className="font-mono">{label}</span>
+    </div>
   );
 }
 
@@ -278,6 +323,18 @@ function LockIcon() {
       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function TimerIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l2.5 2.5" />
+      <path d="M9 3h6" />
+      <path d="M12 3v2" />
     </svg>
   );
 }

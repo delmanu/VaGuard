@@ -8,6 +8,7 @@ const en = {
   "titlebar.maximize": "Maximize",
   "titlebar.restore": "Restore",
   "titlebar.close": "Close",
+  "titlebar.autolock_tooltip": "Auto-lock in {{time}}",
 
   // ── VaultList ───────────────────────────────────────────────────────────────
   "vault.search": "Search",

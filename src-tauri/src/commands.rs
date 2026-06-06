@@ -67,58 +67,93 @@ fn db_path(app: &tauri::AppHandle) -> String {
 /// Derive the vault key from `master_password`, open the DB, and keep both in
 /// memory. The password is NOT stored anywhere — only the derived key lives in
 /// `VaultState` and is zeroed when the vault locks or the app closes.
+/// Also attempts a silent Supabase session refresh so the user does not need
+/// to re-enter Supabase credentials after locking/unlocking.
 #[tauri::command]
-pub fn unlock_vault(
+pub async fn unlock_vault(
     master_password: String,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
+    // Phase 1 — synchronous DB work: hold the lock briefly, then release it.
+    let (sync_url, sync_anon_key, refresh_token) = {
+        let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
 
-    let db = Db::open(&db_path(&app))?;
+        let db = Db::open(&db_path(&app))?;
 
-    // Retrieve or generate the key-derivation salt stored in vault_meta.
-    use base64::Engine as _;
-    let salt_b64 = db.get_meta("kdf_salt").map_err(|e| AppError(e.to_string()))?;
-    let salt: Vec<u8> = match salt_b64 {
-        Some(b) => base64::engine::general_purpose::STANDARD.decode(b)?,
-        None => {
-            let mut salt = vec![0u8; 32];
-            OsRng.fill(salt.as_mut_slice());
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&salt);
-            db.set_meta("kdf_salt", &encoded)
-                .map_err(|e| AppError(e.to_string()))?;
-            salt
-        }
-    };
+        use base64::Engine as _;
+        let salt_b64 = db.get_meta("kdf_salt").map_err(|e| AppError(e.to_string()))?;
+        let salt: Vec<u8> = match salt_b64 {
+            Some(b) => base64::engine::general_purpose::STANDARD.decode(b)?,
+            None => {
+                let mut salt = vec![0u8; 32];
+                OsRng.fill(salt.as_mut_slice());
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&salt);
+                db.set_meta("kdf_salt", &encoded)
+                    .map_err(|e| AppError(e.to_string()))?;
+                salt
+            }
+        };
 
-    let key = derive_key(&master_password, &salt)?;
+        let key = derive_key(&master_password, &salt)?;
 
-    // On first unlock: store an encrypted sentinel so future unlocks can
-    // verify the password is correct before accepting it.
-    const SENTINEL: &[u8] = b"vault-ok";
-    match db.get_meta("sentinel").map_err(|e| AppError(e.to_string()))? {
-        None => {
-            let blob = encrypt(&key, SENTINEL)?;
-            db.set_meta("sentinel", &blob)
-                .map_err(|e| AppError(e.to_string()))?;
-        }
-        Some(blob) => {
-            let plain = decrypt(&key, &blob)
-                .map_err(|_| AppError("Wrong master password".into()))?;
-            if plain != SENTINEL {
-                return Err(AppError("Wrong master password".into()));
+        const SENTINEL: &[u8] = b"vault-ok";
+        match db.get_meta("sentinel").map_err(|e| AppError(e.to_string()))? {
+            None => {
+                let blob = encrypt(&key, SENTINEL)?;
+                db.set_meta("sentinel", &blob)
+                    .map_err(|e| AppError(e.to_string()))?;
+            }
+            Some(blob) => {
+                let plain = decrypt(&key, &blob)
+                    .map_err(|_| AppError("Wrong master password".into()))?;
+                if plain != SENTINEL {
+                    return Err(AppError("Wrong master password".into()));
+                }
             }
         }
+
+        let dir = app_data_dir(&app);
+        let sync_config = sync::load_sync_config(&dir, &key).ok();
+
+        let refresh_token = sync_config
+            .as_ref()
+            .and_then(|c| c.refresh_token.clone());
+        let sync_url = sync_config
+            .as_ref()
+            .map(|c| c.supabase_url.clone());
+        let sync_anon_key = sync_config
+            .as_ref()
+            .map(|c| c.supabase_anon_key.clone());
+
+        s.sync_config = sync_config;
+        s.key = Some(key);
+        s.db = Some(db);
+
+        (sync_url, sync_anon_key, refresh_token)
+    }; // lock released
+
+    // Phase 2 — async Supabase session refresh (no lock held).
+    if let (Some(url), Some(anon_key), Some(rt)) = (sync_url, sync_anon_key, refresh_token) {
+        if let Ok((new_jwt, user_id, new_rt)) =
+            sync::auth_refresh(&url, &anon_key, &rt).await
+        {
+            let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
+            s.jwt     = Some(new_jwt);
+            s.user_id = Some(user_id);
+            let key_bytes = s.key.as_ref().map(|k| k.0);
+            if let Some(ref mut cfg) = s.sync_config {
+                cfg.refresh_token = Some(new_rt);
+                if let Some(kb) = key_bytes {
+                    let dir = app_data_dir(&app);
+                    let _ = sync::save_sync_config(&dir, &VaultKey(kb), cfg);
+                }
+            }
+        }
+        // If refresh fails the token is expired (>7 days) — fall through
+        // and leave jwt as None so the sync panel asks for Supabase password.
     }
 
-    // Try to load sync config if it exists (non-fatal — sync is optional).
-    let dir = app_data_dir(&app);
-    let sync_config = sync::load_sync_config(&dir, &key).ok();
-
-    s.sync_config = sync_config;
-    s.key = Some(key);
-    s.db = Some(db);
     Ok(())
 }
 
@@ -214,7 +249,7 @@ pub async fn sync_configure(
     };
 
     // Step 2 — try login first. If it fails, attempt signup and retry.
-    let (jwt, user_id) =
+    let (jwt, user_id, refresh_token) =
         match sync::auth_login(&url, &anon_key, &email, &supabase_password).await {
             Ok(result) => result,
             Err(login_err) => {
@@ -238,12 +273,13 @@ pub async fn sync_configure(
             }
         };
 
-    // Step 3 — persist config encrypted to disk.
+    // Step 3 — persist config encrypted to disk (includes refresh token).
     let config = SyncConfig {
-        supabase_url: url.clone(),
-        supabase_anon_key: anon_key.clone(),
-        user_email: email.clone(),
+        supabase_url:        url.clone(),
+        supabase_anon_key:   anon_key.clone(),
+        user_email:          email.clone(),
         last_sync_timestamp: 0,
+        refresh_token:       Some(refresh_token.clone()),
     };
     let temp_key = VaultKey(key_bytes);
     let dir = app_data_dir(&app);
@@ -251,8 +287,8 @@ pub async fn sync_configure(
 
     // Step 4 — update in-memory state.
     let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
-    s.jwt = Some(jwt);
-    s.user_id = Some(user_id);
+    s.jwt         = Some(jwt);
+    s.user_id     = Some(user_id);
     s.sync_config = Some(config);
     Ok(())
 }
@@ -261,6 +297,7 @@ pub async fn sync_configure(
 #[tauri::command]
 pub async fn sync_login(
     supabase_password: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<()> {
     let (url, anon_key, email) = {
@@ -269,12 +306,20 @@ pub async fn sync_login(
         (cfg.supabase_url.clone(), cfg.supabase_anon_key.clone(), cfg.user_email.clone())
     };
 
-    let (jwt, user_id) =
+    let (jwt, user_id, refresh_token) =
         sync::auth_login(&url, &anon_key, &email, &supabase_password).await?;
 
     let mut s = state.lock().map_err(|e| AppError(e.to_string()))?;
-    s.jwt = Some(jwt);
+    s.jwt     = Some(jwt);
     s.user_id = Some(user_id);
+    let key_bytes = s.key.as_ref().map(|k| k.0);
+    if let Some(ref mut cfg) = s.sync_config {
+        cfg.refresh_token = Some(refresh_token);
+        if let Some(kb) = key_bytes {
+            let dir = app_data_dir(&app);
+            let _ = sync::save_sync_config(&dir, &VaultKey(kb), cfg);
+        }
+    }
     Ok(())
 }
 
@@ -640,6 +685,60 @@ pub fn change_master_password(
     // 6. Swap the in-memory key.
     s.key = Some(new_key);
     Ok(())
+}
+
+/// Show a native save-file dialog, then write the decrypted vault as JSON.
+/// Returns the chosen path, or `null` if the user cancelled.
+#[tauri::command]
+pub async fn export_vault_to_file(
+    default_filename: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>> {
+    #[derive(serde::Serialize)]
+    struct ExportEntry {
+        title:    String,
+        username: String,
+        password: String,
+        url:      Option<String>,
+        notes:    Option<String>,
+    }
+
+    // Gather and serialize while holding the lock briefly.
+    let json = {
+        let s = state.lock().map_err(|e| AppError(e.to_string()))?;
+        let (db, key) = vault_open(&s)?;
+        let entries = db.list_entries(key)?;
+        let export: Vec<ExportEntry> = entries
+            .into_iter()
+            .map(|e| ExportEntry {
+                title:    e.title,
+                username: e.username,
+                password: e.password,
+                url:      e.url,
+                notes:    e.notes,
+            })
+            .collect();
+        serde_json::to_string_pretty(&export)?
+    };
+
+    // Show native save dialog on a dedicated blocking thread.
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_file_name(&default_filename)
+            .add_filter("JSON", &["json"])
+            .save_file()
+    })
+    .await
+    .map_err(|e| AppError(format!("Dialog error: {e}")))?;
+
+    match chosen {
+        None => Ok(None),
+        Some(path) => {
+            std::fs::write(&path, json.as_bytes())
+                .map_err(|e| AppError(format!("Write error: {e}")))?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+    }
 }
 
 /// Decrypt and export all vault entries as a pretty-printed JSON string.

@@ -21,6 +21,10 @@ pub struct SyncConfig {
     pub user_email: String,
     /// Unix timestamp (seconds) of the last successful upload.
     pub last_sync_timestamp: i64,
+    /// Supabase refresh token — valid for ~7 days, used to restore sessions
+    /// without requiring the user to re-enter their Supabase password.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
 /// Status returned to the frontend on every sync panel load.
@@ -57,6 +61,7 @@ pub struct CloudEntry {
 #[derive(Deserialize)]
 struct AuthResponse {
     access_token: String,
+    refresh_token: String,
     user: AuthUser,
 }
 
@@ -118,13 +123,13 @@ pub fn delete_sync_config(app_data_dir: &Path) -> Result<(), String> {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 /// Authenticate with Supabase Auth (password grant).
-/// Returns `(access_token, user_id)`.
+/// Returns `(access_token, user_id, refresh_token)`.
 pub async fn auth_login(
     url: &str,
     anon_key: &str,
     email: &str,
     password: &str,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, String), String> {
     let endpoint = format!(
         "{}/auth/v1/token?grant_type=password",
         url.trim_end_matches('/')
@@ -141,7 +146,7 @@ pub async fn auth_login(
 
     if resp.status().is_success() {
         let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
-        Ok((auth.access_token, auth.user.id))
+        Ok((auth.access_token, auth.user.id, auth.refresh_token))
     } else {
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
         let msg = body
@@ -151,6 +156,36 @@ pub async fn auth_login(
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
         Err(format!("Login failed: {msg}"))
+    }
+}
+
+/// Exchange a refresh token for a new access token (and rotated refresh token).
+/// Returns `(access_token, user_id, new_refresh_token)`.
+/// Called automatically on vault unlock to restore the Supabase session.
+pub async fn auth_refresh(
+    url: &str,
+    anon_key: &str,
+    refresh_token: &str,
+) -> Result<(String, String, String), String> {
+    let endpoint = format!(
+        "{}/auth/v1/token?grant_type=refresh_token",
+        url.trim_end_matches('/')
+    );
+
+    let resp = reqwest::Client::new()
+        .post(&endpoint)
+        .header("apikey", anon_key)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "refresh_token": refresh_token }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    if resp.status().is_success() {
+        let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
+        Ok((auth.access_token, auth.user.id, auth.refresh_token))
+    } else {
+        Err("Refresh token expired or invalid".into())
     }
 }
 
