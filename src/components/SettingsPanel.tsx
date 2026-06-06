@@ -167,20 +167,18 @@ export default function SettingsPanel({
     }
   }
 
-  // Export vault
+  // Export vault — shows native save dialog via Rust
   async function handleExport() {
     setExportBusy(true);
     setDataMsg(null);
     try {
-      const json = await invoke<string>("export_vault");
-      const blob = new Blob([json], { type: "application/json" });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `vaguard-export-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setDataMsg({ type: "ok", text: t("settings.data.exported") });
+      const date          = new Date().toISOString().slice(0, 10);
+      const defaultFilename = `vaguard-export-${date}.json`;
+      const savedPath     = await invoke<string | null>("export_vault_to_file", { defaultFilename });
+      if (savedPath !== null) {
+        setDataMsg({ type: "ok", text: t("settings.data.exported") });
+      }
+      // null means user cancelled — no message needed
     } catch (err) {
       setDataMsg({ type: "err", text: String(err) });
     } finally {

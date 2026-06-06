@@ -38,6 +38,7 @@ pub fn run() {
             // Settings
             commands::change_master_password,
             commands::export_vault,
+            commands::export_vault_to_file,
             commands::import_vault,
         ])
         .run(tauri::generate_context!())

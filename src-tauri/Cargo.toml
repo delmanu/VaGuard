@@ -35,6 +35,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # Utilities
 base64 = "0.22"
 thiserror = "2"
+rfd = "0.14"
 
 # Sync (HTTP, zero-knowledge Supabase)
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }

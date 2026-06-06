@@ -642,6 +642,60 @@ pub fn change_master_password(
     Ok(())
 }
 
+/// Show a native save-file dialog, then write the decrypted vault as JSON.
+/// Returns the chosen path, or `null` if the user cancelled.
+#[tauri::command]
+pub async fn export_vault_to_file(
+    default_filename: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>> {
+    #[derive(serde::Serialize)]
+    struct ExportEntry {
+        title:    String,
+        username: String,
+        password: String,
+        url:      Option<String>,
+        notes:    Option<String>,
+    }
+
+    // Gather and serialize while holding the lock briefly.
+    let json = {
+        let s = state.lock().map_err(|e| AppError(e.to_string()))?;
+        let (db, key) = vault_open(&s)?;
+        let entries = db.list_entries(key)?;
+        let export: Vec<ExportEntry> = entries
+            .into_iter()
+            .map(|e| ExportEntry {
+                title:    e.title,
+                username: e.username,
+                password: e.password,
+                url:      e.url,
+                notes:    e.notes,
+            })
+            .collect();
+        serde_json::to_string_pretty(&export)?
+    };
+
+    // Show native save dialog on a dedicated blocking thread.
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_file_name(&default_filename)
+            .add_filter("JSON", &["json"])
+            .save_file()
+    })
+    .await
+    .map_err(|e| AppError(format!("Dialog error: {e}")))?;
+
+    match chosen {
+        None => Ok(None),
+        Some(path) => {
+            std::fs::write(&path, json.as_bytes())
+                .map_err(|e| AppError(format!("Write error: {e}")))?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+    }
+}
+
 /// Decrypt and export all vault entries as a pretty-printed JSON string.
 /// The caller is responsible for saving the string to a file.
 #[tauri::command]
