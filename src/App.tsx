@@ -10,6 +10,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen]       = useState(false);
   const [lockSecondsLeft, setLockSecondsLeft] = useState<number | null>(null);
   const [lockTimeout, setLockTimeout]         = useState(() => parseInt(localStorage.getItem(LOCK_KEY) || "0"));
+  const [vaultRefreshKey, setVaultRefreshKey] = useState(0);
   const lastActivityRef                       = useRef(Date.now());
 
   // Apply saved theme on first mount
@@ -77,7 +78,7 @@ export default function App() {
 
       <main className="flex-1 overflow-hidden relative">
         {unlocked ? (
-          <VaultList onLock={() => setUnlocked(false)} />
+          <VaultList onLock={() => setUnlocked(false)} refreshKey={vaultRefreshKey} />
         ) : (
           <UnlockScreen onUnlocked={() => setUnlocked(true)} />
         )}
@@ -87,6 +88,7 @@ export default function App() {
             unlocked={unlocked}
             onClose={() => setSettingsOpen(false)}
             onLockTimeoutChange={setLockTimeout}
+            onEntriesChanged={() => setVaultRefreshKey((k) => k + 1)}
           />
         )}
       </main>

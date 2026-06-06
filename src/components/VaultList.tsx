@@ -11,7 +11,7 @@ type ActiveView = "list" | "sync";
 
 type CtxMenuState = { x: number; y: number; entry?: Entry } | null;
 
-export default function VaultList({ onLock }: { onLock: () => void }) {
+export default function VaultList({ onLock, refreshKey }: { onLock: () => void; refreshKey?: number }) {
   const { t } = useTranslation();
   const [entries, setEntries]           = useState<Entry[]>([]);
   const [search, setSearch]             = useState("");
@@ -25,7 +25,7 @@ export default function VaultList({ onLock }: { onLock: () => void }) {
   const searchRef                       = useRef<HTMLInputElement>(null);
   const { confirm: showConfirm, dialog: confirmDialog } = useConfirm();
 
-  useEffect(() => { loadEntries(); }, []);
+  useEffect(() => { loadEntries(); }, [refreshKey]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
