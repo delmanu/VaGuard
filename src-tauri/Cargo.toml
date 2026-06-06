@@ -1,6 +1,6 @@
 [package]
 name = "vaguard"
-version = "1.0.0"
+version = "1.1.0"
 description = "VaGuard — Zero-knowledge password manager"
 authors = ["delmanu"]
 edition = "2021"
